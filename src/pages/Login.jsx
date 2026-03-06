@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Package, Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Login = () => {
@@ -60,16 +60,16 @@ const Login = () => {
       <div className="max-w-md w-full space-y-8">
         {/* Main glass card */}
         <div className="backdrop-blur-xl bg-white/5 rounded-2xl shadow-xl border border-white/10 p-8">
-          {/* Header */}
+          {/* Header with Logo */}
           <div className="text-center mb-8">
-            <div className="flex justify-center">
-              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-xl shadow-lg">
-                <Package className="h-12 w-12 text-white" />
-              </div>
+            <div className="flex justify-center mb-4">
+              <img 
+                src="/LOGO_CXP Motozone-02.png" 
+                alt="CXP Motozone Logo" 
+                className="h-20 w-auto object-contain"
+              />
             </div>
-            <h2 className="mt-6 text-3xl font-bold text-white">
-              Marketing Asset Inventory
-            </h2>
+        
             <p className="mt-2 text-gray-400">
               Sign in to access your dashboard
             </p>
@@ -179,7 +179,7 @@ const Login = () => {
 
         {/* Footer */}
         <p className="text-center text-sm text-gray-600">
-          © 2026 Marketing Asset Inventory. All rights reserved.
+          © 2026 CXP Motozone. All rights reserved.
         </p>
       </div>
     </div>

@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  Package, UserCog, Users, UserCircle, Mail, Lock, User, 
+  UserCog, Users, UserCircle, Mail, Lock, User, 
   ArrowLeft, Eye, EyeOff, Check, X 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -147,14 +147,14 @@ function Register() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-3 rounded-xl shadow-lg">
-            <Package className="h-12 w-12 text-white" />
-          </div>
+        <div className="flex justify-center mb-4">
+          <img 
+            src="/LOGO_CXP Motozone-02.png" 
+            alt="CXP Motozone Logo" 
+            className="h-24 w-auto object-contain"
+          />
         </div>
-        <h2 className="mt-6 text-center text-3xl font-bold text-white">
-          Marketing Asset Inventory
-        </h2>
+        
         <h3 className="mt-2 text-center text-xl text-gray-400">
           Create your account
         </h3>
