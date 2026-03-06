@@ -1,15 +1,16 @@
-// services/api.js
 import axios from 'axios';
 
-// Base URL configuration for Vite
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Get the API URL from environment variables
+const API_URL = import.meta.env.VITE_API_URL || 'https://cxpinventorybackend.onrender.com/api';
 
+// Create axios instance with default config
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000, // 10 second timeout
+  timeout: 30000, // 30 second timeout for production
+  withCredentials: true, // Important for CORS with credentials
 });
 
 // Request interceptor to add token and log requests
@@ -22,7 +23,7 @@ api.interceptors.request.use(
     
     // Log requests in development
     if (import.meta.env.DEV) {
-      console.log(`🚀 ${config.method.toUpperCase()} ${config.baseURL}${config.url}`, config.data || '');
+      console.log(`🚀 ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, config.data || '');
     }
     
     return config;
@@ -42,11 +43,9 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Log errors in development
+    // Handle errors
     if (import.meta.env.DEV) {
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
         console.error('❌ Error Response:', {
           status: error.response.status,
           url: error.config?.url,
@@ -54,10 +53,8 @@ api.interceptors.response.use(
           headers: error.response.headers
         });
       } else if (error.request) {
-        // The request was made but no response was received
         console.error('❌ No Response:', error.request);
       } else {
-        // Something happened in setting up the request that triggered an Error
         console.error('❌ Request Error:', error.message);
       }
     }
@@ -74,12 +71,23 @@ api.interceptors.response.use(
     
     // Handle network errors
     if (!error.response) {
-      console.error('Network error:', error);
-      error.message = 'Network error. Please check your connection.';
+      console.error('Network error - please check if backend is running:', error);
+      error.message = 'Network error. Please check your connection or try again later.';
     }
     
     return Promise.reject(error);
   }
 );
+
+// Health check function
+export const checkBackendHealth = async () => {
+  try {
+    const response = await api.get('/health');
+    return response.data;
+  } catch (error) {
+    console.error('Backend health check failed:', error);
+    return null;
+  }
+};
 
 export default api;
