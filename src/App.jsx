@@ -24,7 +24,7 @@ import ShipmentList from './components/shipments/ShipmentList';
 import ShipmentForm from './components/shipments/ShipmentForm';
 import ShipmentDetails from './components/shipments/ShipmentDetails';
 import ConnectionTest from './components/ConnectionTest'; // Import the connection test component
-import api, { checkBackendHealth } from './api/config'; // Import API utilities
+import api, { checkBackendHealth } from './services/api'; // Import API utilities
 
 function App() {
   const [backendStatus, setBackendStatus] = useState({
