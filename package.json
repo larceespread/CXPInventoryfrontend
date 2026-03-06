@@ -1,0 +1,39 @@
+{
+  "name": "marketing-asset-inventory",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "axios": "^1.13.5",
+    "chart.js": "^4.5.1",
+    "cors": "^2.8.5",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.0",
+    "lucide-react": "^0.292.0",
+    "mongodb": "^4.14.0",
+    "mongoose": "^7.6.3",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.6.0",
+    "react-router-dom": "^6.30.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.0",
+    "vite": "^5.0.0"
+  }
+}
