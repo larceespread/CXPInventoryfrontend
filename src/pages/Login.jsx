@@ -179,7 +179,7 @@ const Login = () => {
 
         {/* Footer */}
         <p className="text-center text-sm text-gray-600">
-          © 2024 Marketing Asset Inventory. All rights reserved.
+          © 2026 Marketing Asset Inventory. All rights reserved.
         </p>
       </div>
     </div>
