@@ -480,7 +480,6 @@ const TotalAssets = ({ inventory = [] }) => {
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Total Assets (Lifetime)</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Total Items: {inventory.length} | Total Quantity: {totals.totalItems.toLocaleString()} | 
               Total Value: ₱{totals.totalValue.toLocaleString()}

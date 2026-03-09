@@ -16,20 +16,28 @@ import {
   ArrowUpCircle,
   ArrowDownCircle,
   RotateCcw,
-  CheckSquare
+  CheckSquare,
+  X
 } from 'lucide-react';
 import { useShipment } from '../../context/ShipmentContext';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 const ShipmentList = () => {
   const navigate = useNavigate();
-  const { shipments, loading, fetchShipments, deleteShipment, updateStatus } = useShipment();
+  const { user } = useAuth();
+  const { shipments, loading, fetchShipments, deleteShipment, updateStatus, returnItems } = useShipment();
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
   const [showCancelConfirmModal, setShowCancelConfirmModal] = useState(false);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [returnItemsList, setReturnItemsList] = useState([]);
+  const [returnCondition, setReturnCondition] = useState('good');
+  const [returnRemarks, setReturnRemarks] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchShipments();
@@ -115,16 +123,114 @@ const ShipmentList = () => {
     }
   };
 
+  const handleReturnClick = (shipment) => {
+    setSelectedShipment(shipment);
+    
+    if (!shipment || !shipment.items) {
+      toast.error('No items found');
+      return;
+    }
+
+    // Prepare items for return modal
+    const itemsWithReturnInfo = shipment.items.map((item, index) => {
+      const returnedQty = item.returnedQuantity || 0;
+      const pendingQuantity = item.quantity - returnedQty;
+      
+      return {
+        ...item,
+        index,
+        pendingQuantity,
+        isReturnable: true
+      };
+    });
+
+    const returnable = itemsWithReturnInfo.filter(item => 
+      item.pendingQuantity > 0 // Only show items with pending quantity
+    );
+    
+    if (returnable.length === 0) {
+      toast.error('No items pending return');
+      return;
+    }
+    
+    setReturnItemsList(returnable.map(item => ({
+      ...item,
+      returnQuantity: item.pendingQuantity
+    })));
+    setReturnCondition('good');
+    setReturnRemarks('');
+    setShowReturnModal(true);
+  };
+
+  const handleReturnSubmit = async () => {
+    try {
+      const itemsToReturn = returnItemsList.filter(item => item.returnQuantity > 0);
+      
+      if (itemsToReturn.length === 0) {
+        toast.error('Please enter at least one item quantity to return');
+        return;
+      }
+
+      setSubmitting(true);
+      
+      const returnData = {
+        items: itemsToReturn.map(item => ({
+          itemIndex: item.index,
+          quantity: Number(item.returnQuantity)
+        })),
+        condition: returnCondition,
+        remarks: returnRemarks
+      };
+      
+      console.log('Sending return data:', JSON.stringify(returnData, null, 2));
+      
+      await returnItems(selectedShipment._id, returnData);
+      
+      setShowReturnModal(false);
+      setSelectedShipment(null);
+      await fetchShipments();
+      toast.success('Items returned successfully');
+    } catch (error) {
+      console.error('Return error:', error);
+      toast.error(error.message || 'Failed to return items');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const updateReturnQuantity = (index, value) => {
+    const newQuantity = parseInt(value) || 0;
+    if (newQuantity >= 0 && newQuantity <= returnItemsList[index].pendingQuantity) {
+      const updated = [...returnItemsList];
+      updated[index].returnQuantity = newQuantity;
+      setReturnItemsList(updated);
+    }
+  };
+
   const isEditable = (status) => {
     return status === 'draft';
   };
 
   const isDeletable = (status) => {
-    return status !== 'completed' && status !== 'cancelled';
+    return status !== 'completed' && status !== 'cancelled' && status !== 'fully_returned';
   };
 
   const canChangeStatus = (status) => {
-    return status !== 'completed';
+    return status !== 'completed' && status !== 'fully_returned';
+  };
+
+  const canReturn = (status) => {
+    // Return button available for completed, partially_returned, and any status where items might be pending return
+    return status === 'completed' || status === 'partially_returned' || status === 'egress' || status === 'ingress';
+  };
+
+  const hasPendingReturns = (shipment) => {
+    if (!shipment || !shipment.items) return false;
+    
+    return shipment.items.some(item => {
+      const pendingQty = (item.quantity - (item.returnedQuantity || 0));
+      return pendingQty > 0;
+    });
   };
 
   const filteredShipments = shipments.filter(shipment => {
@@ -157,7 +263,6 @@ const ShipmentList = () => {
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Shipments</h2>
-   
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
@@ -173,6 +278,8 @@ const ShipmentList = () => {
               <option value="egress">Egress</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
+              <option value="partially_returned">Partially Returned</option>
+              <option value="fully_returned">Fully Returned</option>
             </select>
           </div>
           
@@ -263,6 +370,11 @@ const ShipmentList = () => {
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       Total: {shipment.items?.reduce((sum, item) => sum + (item.quantity || 0), 0)} units
                     </div>
+                    {shipment.returnedItems && shipment.returnedItems.length > 0 && (
+                      <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                        Returned: {shipment.returnedItems.reduce((sum, item) => sum + (item.quantity || 0), 0)} units
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getStatusBadge(shipment.status)}
@@ -274,19 +386,30 @@ const ShipmentList = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end space-x-3">
+                    <div className="flex justify-end space-x-2">
                       <button
                         onClick={() => navigate(`/shipments/${shipment._id}`)}
-                        className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors duration-200 text-sm"
+                        className="inline-flex items-center px-2.5 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors duration-200 text-xs"
                         title="View shipment details"
                       >
-                        <Eye className="h-4 w-4 mr-1" />
+                        <Eye className="h-3.5 w-3.5 mr-1" />
                         View
                       </button>
                       
+                      {canReturn(shipment.status) && hasPendingReturns(shipment) && (
+                        <button
+                          onClick={() => handleReturnClick(shipment)}
+                          className="inline-flex items-center px-2.5 py-1.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-md hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors duration-200 text-xs"
+                          title="Return items"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                          Return
+                        </button>
+                      )}
+                      
                       <button
                         onClick={() => isEditable(shipment.status) && navigate(`/shipments/edit/${shipment._id}`)}
-                        className={`inline-flex items-center px-3 py-1 rounded-md transition-colors duration-200 text-sm ${
+                        className={`inline-flex items-center px-2.5 py-1.5 rounded-md transition-colors duration-200 text-xs ${
                           isEditable(shipment.status)
                             ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/50'
                             : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
@@ -294,17 +417,17 @@ const ShipmentList = () => {
                         title={isEditable(shipment.status) ? "Edit shipment" : "Cannot edit - shipment is not in draft status"}
                         disabled={!isEditable(shipment.status)}
                       >
-                        <Edit className="h-4 w-4 mr-1" />
+                        <Edit className="h-3.5 w-3.5 mr-1" />
                         Edit
                       </button>
                       
                       {shipment.status === 'cancelled' ? (
                         <button
                           onClick={() => handleCancelClick(shipment)}
-                          className="inline-flex items-center px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors duration-200 text-sm"
+                          className="inline-flex items-center px-2.5 py-1.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors duration-200 text-xs"
                           title="Cancel shipment"
                         >
-                          <XCircle className="h-4 w-4 mr-1" />
+                          <XCircle className="h-3.5 w-3.5 mr-1" />
                           Cancel
                         </button>
                       ) : (
@@ -315,15 +438,15 @@ const ShipmentList = () => {
                               setShowStatusModal(true);
                             }
                           }}
-                          className={`inline-flex items-center px-3 py-1 rounded-md transition-colors duration-200 text-sm ${
+                          className={`inline-flex items-center px-2.5 py-1.5 rounded-md transition-colors duration-200 text-xs ${
                             canChangeStatus(shipment.status)
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50'
+                              ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50'
                               : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                           }`}
-                          title={canChangeStatus(shipment.status) ? "Update shipment status" : "Cannot update status - shipment is completed"}
+                          title={canChangeStatus(shipment.status) ? "Update shipment status" : "Cannot update status - shipment is completed or fully returned"}
                           disabled={!canChangeStatus(shipment.status)}
                         >
-                          <CheckCircle className="h-4 w-4 mr-1" />
+                          <CheckCircle className="h-3.5 w-3.5 mr-1" />
                           Status
                         </button>
                       )}
@@ -335,15 +458,15 @@ const ShipmentList = () => {
                             setShowDeleteModal(true);
                           }
                         }}
-                        className={`inline-flex items-center px-3 py-1 rounded-md transition-colors duration-200 text-sm ${
+                        className={`inline-flex items-center px-2.5 py-1.5 rounded-md transition-colors duration-200 text-xs ${
                           isDeletable(shipment.status)
                             ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/50'
                             : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                         }`}
-                        title={isDeletable(shipment.status) ? "Delete shipment" : "Cannot delete - shipment is completed or cancelled"}
+                        title={isDeletable(shipment.status) ? "Delete shipment" : "Cannot delete - shipment is completed, cancelled, or fully returned"}
                         disabled={!isDeletable(shipment.status)}
                       >
-                        <Trash2 className="h-4 w-4 mr-1" />
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
                         Delete
                       </button>
                     </div>
@@ -370,6 +493,7 @@ const ShipmentList = () => {
         </table>
       </div>
 
+      {/* Delete Modal */}
       {showDeleteModal && selectedShipment && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full transition-colors duration-200">
@@ -400,6 +524,7 @@ const ShipmentList = () => {
         </div>
       )}
 
+      {/* Status Modal */}
       {showStatusModal && selectedShipment && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full transition-colors duration-200">
@@ -412,7 +537,7 @@ const ShipmentList = () => {
             </p>
             
             <div className="space-y-2 mb-6">
-              {['draft',  'ingress', 'egress', 'completed', 'cancelled'].map((status) => (
+              {['draft', 'ingress', 'egress', 'completed', 'cancelled', 'partially_returned', 'fully_returned'].map((status) => (
                 <button
                   key={status}
                   onClick={() => handleStatusUpdate(status)}
@@ -444,6 +569,7 @@ const ShipmentList = () => {
         </div>
       )}
 
+      {/* Cancel Confirm Modal */}
       {showCancelConfirmModal && selectedShipment && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full transition-colors duration-200">
@@ -468,6 +594,108 @@ const ShipmentList = () => {
                 className="px-4 py-2 bg-red-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-red-700"
               >
                 Yes, Cancel Shipment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return Modal */}
+      {showReturnModal && selectedShipment && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-hidden transition-colors duration-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                Return Items - {selectedShipment.shipmentNumber}
+              </h3>
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 max-h-60 overflow-y-auto">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="bg-gray-50 dark:bg-gray-700">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Item</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Pending</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Return Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {returnItemsList.map((item, index) => (
+                    <tr key={index}>
+                      <td className="px-4 py-2 text-sm text-gray-900 dark:text-white">{item.itemDescription}</td>
+                      <td className="px-4 py-2 text-sm text-gray-900 dark:text-white">{item.pendingQuantity}</td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.pendingQuantity}
+                          value={item.returnQuantity}
+                          onChange={(e) => updateReturnQuantity(index, e.target.value)}
+                          className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Condition
+                </label>
+                <div className="flex flex-wrap gap-4">
+                  {['good', 'damaged', 'partial', 'lost'].map((condition) => (
+                    <label key={condition} className="inline-flex items-center">
+                      <input
+                        type="radio"
+                        value={condition}
+                        checked={returnCondition === condition}
+                        onChange={(e) => setReturnCondition(e.target.value)}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      />
+                      <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                        {condition.charAt(0).toUpperCase() + condition.slice(1)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Remarks
+                </label>
+                <textarea
+                  value={returnRemarks}
+                  onChange={(e) => setReturnRemarks(e.target.value)}
+                  rows="3"
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  placeholder="Enter remarks..."
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReturnSubmit}
+                disabled={submitting}
+                className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Processing...' : 'Confirm Return'}
               </button>
             </div>
           </div>

@@ -491,6 +491,9 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
     if (!product) return true;
     
     const availableStock = getStockAtLocation(product, location);
+    // Don't show error if quantity is 0 or empty
+    if (!quantity || quantity === 0) return true;
+    
     const error = quantity > availableStock ? `Only ${availableStock} available` : null;
     
     setQuantityErrors(prev => ({
@@ -541,8 +544,8 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
         
         return newSelected;
       } else {
-        // Add product with default values
-        const defaultQty = 1;
+        // Add product with default values - set quantity to empty string to allow user to type
+        const defaultQty = '';
         setItemQuantities(prev => ({ ...prev, [productId]: defaultQty }));
         setItemOtherDetails(prev => ({ ...prev, [productId]: '' }));
         setItemUnits(prev => ({ ...prev, [productId]: 'pcs' }));
@@ -550,9 +553,6 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
         setItemRemarkList(prev => ({ ...prev, [productId]: '' }));
         setItemSelectedLocation(prev => ({ ...prev, [productId]: defaultLocation }));
         setExpandedItems(prev => ({ ...prev, [productId]: true })); // Auto-expand for quantity input
-        
-        // Validate initial quantity
-        validateQuantity(productId, defaultQty, defaultLocation);
         
         return [...prev, product];
       }
@@ -573,7 +573,7 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
     } else {
       setSelectedProducts([...products]);
       
-      // Initialize all products with default values
+      // Initialize all products with default values - set quantity to empty string
       const newQuantities = {};
       const newDetails = {};
       const newUnits = {};
@@ -585,7 +585,7 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
       
       products.forEach(product => {
         const productId = getProductId(product);
-        const defaultQty = 1;
+        const defaultQty = '';
         newQuantities[productId] = defaultQty;
         newDetails[productId] = '';
         newUnits[productId] = 'pcs';
@@ -593,12 +593,6 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
         newRemarks[productId] = '';
         newLocations[productId] = itemLocation;
         newExpanded[productId] = false;
-        
-        // Validate initial quantity
-        const availableStock = getStockAtLocation(product, itemLocation);
-        if (defaultQty > availableStock) {
-          newErrors[productId] = `Only ${availableStock} available`;
-        }
       });
       
       setItemQuantities(newQuantities);
@@ -621,8 +615,20 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
   };
 
   const updateItemQuantity = (productId, value) => {
-    const quantity = parseInt(value) || 1;
-    if (quantity >= 1) {
+    // Allow empty string or any number
+    if (value === '') {
+      setItemQuantities(prev => ({ ...prev, [productId]: '' }));
+      // Clear error for empty quantity
+      setQuantityErrors(prev => ({
+        ...prev,
+        [productId]: null
+      }));
+      return;
+    }
+    
+    const quantity = parseInt(value);
+    // Only update if it's a valid number (not NaN)
+    if (!isNaN(quantity) && quantity >= 0) {
       setItemQuantities(prev => ({ ...prev, [productId]: quantity }));
       
       // Validate quantity against selected location
@@ -635,8 +641,10 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
     setItemSelectedLocation(prev => ({ ...prev, [productId]: location }));
     
     // Re-validate quantity with new location
-    const quantity = itemQuantities[productId] || 1;
-    validateQuantity(productId, quantity, location);
+    const quantity = itemQuantities[productId];
+    if (quantity) {
+      validateQuantity(productId, quantity, location);
+    }
   };
 
   const updateItemOtherDetails = (productId, value) => {
@@ -754,6 +762,18 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
       return;
     }
 
+    // Check if any item has empty quantity
+    const hasEmptyQuantity = selectedProducts.some(product => {
+      const productId = getProductId(product);
+      const quantity = itemQuantities[productId];
+      return quantity === '' || quantity === undefined;
+    });
+
+    if (hasEmptyQuantity) {
+      toast.error('Please enter quantity for all selected items');
+      return;
+    }
+
     const newItems = [];
 
     selectedProducts.forEach(product => {
@@ -818,7 +838,7 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
         const productData = product.data || product;
         const productId = getProductId(productData);
         setSelectedProducts([productData]);
-        setItemQuantities({ [productId]: item.quantity || 1 });
+        setItemQuantities({ [productId]: item.quantity || '' });
         setItemOtherDetails({ [productId]: item.itemOtherDetails || '' });
         setItemUnits({ [productId]: item.unit || 'pcs' });
         setItemReturnables({ [productId]: item.returnable || 'no' });
@@ -848,13 +868,19 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
       return;
     }
 
-    const quantity = itemQuantities[productId] || 1;
-    const location = itemSelectedLocation[productId] || itemLocation;
+    const quantity = itemQuantities[productId];
     
+    if (quantity === '' || quantity === undefined) {
+      toast.error('Please enter quantity');
+      return;
+    }
+
     if (quantity < 1) {
       toast.error('Quantity must be at least 1');
       return;
     }
+
+    const location = itemSelectedLocation[productId] || itemLocation;
 
     // Check if quantity exceeds available stock
     const availableStock = getStockAtLocation(product, location);
@@ -1124,12 +1150,12 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
         <div className="mb-8 border-b border-gray-200 dark:border-gray-700 pb-6">
           <h3 className="text-lg font-medium text-gray-800 dark:text-white mb-4 flex items-center">
             <Truck className="h-5 w-5 mr-2" />
-            Driver Details
+            Person In-Charge
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Driver Name
+                Name
               </label>
               <input
                 type="text"
@@ -1510,6 +1536,7 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
                       const allLocationsStock = getAllLocationsStock(product);
                       const hasStockIssue = quantityErrors[productId];
                       const stockStatusColor = getStockStatusColor(product);
+                      const currentQuantity = itemQuantities[productId] || '';
                       
                       return (
                         <div
@@ -1613,10 +1640,11 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
                                       </label>
                                       <input
                                         type="number"
-                                        min="1"
+                                        min="0"
                                         max={availableStock}
-                                        value={itemQuantities[productId] || 1}
+                                        value={currentQuantity}
                                         onChange={(e) => updateItemQuantity(productId, e.target.value)}
+                                        placeholder="Enter quantity"
                                         className={`block w-full px-2 py-1 text-sm border rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white ${
                                           hasStockIssue 
                                             ? 'border-red-500 dark:border-red-500 focus:ring-red-500 focus:border-red-500' 
@@ -1732,9 +1760,10 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
                     </label>
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       value={bulkQuantity}
-                      onChange={(e) => setBulkQuantity(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setBulkQuantity(parseInt(e.target.value) || '')}
+                      placeholder="Enter quantity"
                       className="block w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     />
                   </div>
@@ -1845,13 +1874,14 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
                     </label>
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       max={getStockAtLocation(selectedProducts[0], itemSelectedLocation[getProductId(selectedProducts[0])] || itemLocation)}
-                      value={itemQuantities[getProductId(selectedProducts[0])] || 1}
+                      value={itemQuantities[getProductId(selectedProducts[0])] || ''}
                       onChange={(e) => {
                         const productId = getProductId(selectedProducts[0]);
                         updateItemQuantity(productId, e.target.value);
                       }}
+                      placeholder="Enter quantity"
                       className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                     />
                   </div>

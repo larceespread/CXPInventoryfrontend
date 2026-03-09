@@ -122,16 +122,23 @@ const ShipmentDetails = () => {
       const wb = XLSX.utils.book_new();
       const excelData = [];
       
+      // Title - exactly matching print format
       excelData.push(['GATE PASS']);
       excelData.push([]);
-      excelData.push(['NAME:', currentShipment.requestedBy || '', 'Date Prepared:', currentShipment.datePrepared ? new Date(currentShipment.datePrepared).toLocaleDateString() : '']);
-      excelData.push(['DEPARTMENT:', currentShipment.department || '', 'Dates Covered:', currentShipment.datesCovered || '']);
+      
+      // Header section - matching print format exactly
+      excelData.push(['NAME:', currentShipment.requestedBy || '____________________', '', '', 'Date Prepared:', currentShipment.datePrepared ? new Date(currentShipment.datePrepared).toLocaleDateString() : '____________________']);
+      excelData.push(['DEPARTMENT:', currentShipment.department || '____________________', '', '', 'Dates Covered:', currentShipment.datesCovered || '____________________']);
       excelData.push([]);
-      excelData.push(['PURPOSE:', currentShipment.purpose || '']);
-      excelData.push(['NOTE OR REQUEST:', currentShipment.noteOrRequest || currentShipment.notes || '']);
+      excelData.push(['PURPOSE:', currentShipment.purpose || '____________________']);
+      excelData.push(['NOTE OR REQUEST:', currentShipment.noteOrRequest || currentShipment.notes || '____________________']);
       excelData.push([]);
+      
+      // Items section header - exactly matching print format
       excelData.push(['BREAKDOWN OF ITEMS NEEDED FOR THE EVENT']);
       excelData.push([]);
+      
+      // Table headers with merged cells format matching print
       excelData.push([
         'No.',
         'ITEM DESCRIPTION',
@@ -143,6 +150,7 @@ const ShipmentDetails = () => {
         'Remarks'
       ]);
       
+      // Items data - exactly matching print format
       if (currentShipment.items && currentShipment.items.length > 0) {
         currentShipment.items.forEach((item, index) => {
           const isReturnable = 
@@ -164,17 +172,22 @@ const ShipmentDetails = () => {
           ]);
         });
       } else {
-        for (let i = 0; i < 10; i++) {
+        // Empty rows matching print format (20 rows)
+        for (let i = 0; i < 20; i++) {
           excelData.push([i + 1, '', '', '', '', '', '', '']);
         }
       }
       
       excelData.push([]);
+      
+      // Notes section - exactly matching print format
       excelData.push(['Notes:']);
       excelData.push([]);
       excelData.push(['PREPARED', 'APPROVED']);
       excelData.push(['____________________', '____________________']);
       excelData.push([]);
+      
+      // Truck driver details - exactly matching print format
       excelData.push(['TRUCK DRIVER DETAILS:']);
       excelData.push([
         'Driver Name:',
@@ -185,14 +198,33 @@ const ShipmentDetails = () => {
         currentShipment.truckDriver?.destination || '____________________'
       ]);
       
+      // Create worksheet and set column widths for better print-like appearance
       const ws = XLSX.utils.aoa_to_sheet(excelData);
+      
+      // Merge cells for title to center it (A1:H1)
+      if (!ws['!merges']) ws['!merges'] = [];
+      ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }); // Merge GATE PASS title
+      
+      // Set column widths to match print format
       const colWidths = [
-        { wch: 5 }, { wch: 30 }, { wch: 10 }, { wch: 8 }, { wch: 15 },
-        { wch: 10 }, { wch: 10 }, { wch: 20 }
+        { wch: 5 },   // No.
+        { wch: 40 },  // ITEM DESCRIPTION (wider for better readability)
+        { wch: 10 },  // QUANTITY
+        { wch: 8 },   // UNIT
+        { wch: 15 },  // DETAILS
+        { wch: 10 },  // Yes column
+        { wch: 10 },  // No column
+        { wch: 30 }   // Remarks (wider for better readability)
       ];
       ws['!cols'] = colWidths;
       
+      // Style the title row to be bold and larger font
+      if (!ws['!rows']) ws['!rows'] = [];
+      ws['!rows'][0] = { hpt: 30, font: { bold: true, sz: 24 } };
+      
       XLSX.utils.book_append_sheet(wb, ws, 'Gate Pass');
+      
+      // Generate filename with shipment number and date
       const fileName = `GATE_PASS_${currentShipment.shipmentNumber || 'shipment'}_${new Date().toISOString().split('T')[0]}.xlsx`;
       XLSX.writeFile(wb, fileName);
       
@@ -709,16 +741,7 @@ const ShipmentDetails = () => {
           >
             Returns
           </button>
-          <button
-            onClick={() => setActiveTab('timeline')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'timeline'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Timeline
-          </button>
+      
         </nav>
       </div>
 

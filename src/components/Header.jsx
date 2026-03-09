@@ -1,6 +1,6 @@
 // components/Header.jsx
 import React, { useState, useEffect } from 'react';
-import { Menu, Bell, LogOut, AlertCircle, X, Sun, Moon } from 'lucide-react';
+import { Menu, Bell, LogOut, AlertCircle, X, Sun, Moon, Trash2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
@@ -20,15 +20,38 @@ const Header = ({ toggleSidebar }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
-  // Fetch notifications based on real data
+  // Load notifications from localStorage on mount
   useEffect(() => {
+    const savedNotifications = localStorage.getItem('notifications');
+    if (savedNotifications) {
+      try {
+        const parsed = JSON.parse(savedNotifications);
+        // Convert timestamp strings back to Date objects
+        const withDates = parsed.map(n => ({
+          ...n,
+          timestamp: new Date(n.timestamp)
+        }));
+        setNotifications(withDates);
+        setUnreadCount(withDates.filter(n => !n.read).length);
+      } catch (error) {
+        console.error('Error loading saved notifications:', error);
+      }
+    }
+    
+    // Fetch fresh notifications
     fetchNotifications();
     
     // Refresh notifications every 30 seconds
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Save notifications to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('notifications', JSON.stringify(notifications));
+  }, [notifications]);
 
   const fetchNotifications = async () => {
     try {
@@ -38,9 +61,7 @@ const Header = ({ toggleSidebar }) => {
       // Fetch low stock products
       try {
         const lowStockResponse = await productService.getLowStockProducts();
-        console.log('Low stock response:', lowStockResponse);
         
-        // Handle different response structures
         let lowStockProducts = [];
         if (lowStockResponse?.data) {
           lowStockProducts = Array.isArray(lowStockResponse.data) 
@@ -52,14 +73,13 @@ const Header = ({ toggleSidebar }) => {
 
         if (lowStockProducts.length > 0) {
           lowStockProducts.slice(0, 5).forEach(product => {
-            // Find which locations are low stock
             const lowStockLocations = product.storageLocations?.filter(
               loc => loc.status === 'low_stock' || (loc.quantity > 0 && loc.quantity <= (loc.reorderLevel || 10))
             ) || [];
             
             lowStockLocations.forEach(loc => {
               newNotifications.push({
-                id: `lowstock-${product._id}-${loc.location}`,
+                id: `lowstock-${product._id}-${loc.location}-${Date.now()}`,
                 type: 'warning',
                 title: 'Low Stock Alert',
                 message: `${product.name} is running low at ${loc.location} (${loc.quantity} left, reorder at ${loc.reorderLevel || 10})`,
@@ -70,7 +90,8 @@ const Header = ({ toggleSidebar }) => {
                 productId: product._id,
                 location: loc.location,
                 quantity: loc.quantity,
-                reorderLevel: loc.reorderLevel || 10
+                reorderLevel: loc.reorderLevel || 10,
+                deletable: true
               });
             });
           });
@@ -82,9 +103,7 @@ const Header = ({ toggleSidebar }) => {
       // Fetch out of stock products
       try {
         const outOfStockResponse = await productService.getOutOfStockProducts();
-        console.log('Out of stock response:', outOfStockResponse);
         
-        // Handle different response structures
         let outOfStockProducts = [];
         if (outOfStockResponse?.data) {
           outOfStockProducts = Array.isArray(outOfStockResponse.data) 
@@ -96,14 +115,13 @@ const Header = ({ toggleSidebar }) => {
 
         if (outOfStockProducts.length > 0) {
           outOfStockProducts.slice(0, 5).forEach(product => {
-            // Find which locations are out of stock
             const outOfStockLocations = product.storageLocations?.filter(
               loc => loc.status === 'out_of_stock' || loc.quantity === 0
             ) || [];
             
             outOfStockLocations.forEach(loc => {
               newNotifications.push({
-                id: `outofstock-${product._id}-${loc.location}`,
+                id: `outofstock-${product._id}-${loc.location}-${Date.now()}`,
                 type: 'error',
                 title: 'Out of Stock',
                 message: `${product.name} is out of stock at ${loc.location}`,
@@ -112,7 +130,8 @@ const Header = ({ toggleSidebar }) => {
                 icon: '❌',
                 link: `/products/${product._id}`,
                 productId: product._id,
-                location: loc.location
+                location: loc.location,
+                deletable: true
               });
             });
           });
@@ -124,7 +143,6 @@ const Header = ({ toggleSidebar }) => {
       // Fetch pending shipments
       try {
         const shipmentsResponse = await shipmentService.getShipments({ status: 'pending' });
-        console.log('Shipments response:', shipmentsResponse);
         
         let shipments = [];
         if (shipmentsResponse?.data) {
@@ -138,7 +156,7 @@ const Header = ({ toggleSidebar }) => {
         if (shipments.length > 0) {
           shipments.slice(0, 5).forEach(shipment => {
             newNotifications.push({
-              id: `shipment-${shipment._id}`,
+              id: `shipment-${shipment._id}-${Date.now()}`,
               type: 'info',
               title: 'Pending Shipment',
               message: `Shipment #${shipment.shipmentNumber} to ${shipment.truckDriver?.destination || 'Unknown'} requires attention`,
@@ -148,7 +166,8 @@ const Header = ({ toggleSidebar }) => {
               link: `/shipments/${shipment._id}`,
               shipmentNumber: shipment.shipmentNumber,
               destination: shipment.truckDriver?.destination,
-              itemCount: shipment.items?.length || 0
+              itemCount: shipment.items?.length || 0,
+              deletable: true
             });
           });
         }
@@ -156,7 +175,7 @@ const Header = ({ toggleSidebar }) => {
         console.log('Error fetching shipments:', error);
       }
 
-      // Fetch in-transit items (loading, ingress, egress)
+      // Fetch in-transit items
       try {
         const inTransitResponse = await shipmentService.getShipments({ 
           status: ['loading', 'ingress', 'egress'] 
@@ -172,7 +191,7 @@ const Header = ({ toggleSidebar }) => {
         if (inTransit.length > 0) {
           inTransit.slice(0, 3).forEach(shipment => {
             newNotifications.push({
-              id: `intransit-${shipment._id}`,
+              id: `intransit-${shipment._id}-${Date.now()}`,
               type: 'info',
               title: 'In Transit',
               message: `Shipment #${shipment.shipmentNumber} is ${shipment.status} to ${shipment.truckDriver?.destination || 'Unknown'}`,
@@ -180,7 +199,8 @@ const Header = ({ toggleSidebar }) => {
               read: false,
               icon: '🚚',
               link: `/shipments/${shipment._id}`,
-              status: shipment.status
+              status: shipment.status,
+              deletable: true
             });
           });
         }
@@ -188,10 +208,9 @@ const Header = ({ toggleSidebar }) => {
         console.log('Error fetching in-transit shipments:', error);
       }
 
-      // Fetch expiring products (if endpoint exists)
+      // Fetch expiring products
       try {
         const expiringResponse = await productService.getExpiringProducts(7);
-        console.log('Expiring products response:', expiringResponse);
         
         let expiringProducts = [];
         if (expiringResponse?.data) {
@@ -210,7 +229,7 @@ const Header = ({ toggleSidebar }) => {
               : null;
 
             newNotifications.push({
-              id: `expiring-${product._id}`,
+              id: `expiring-${product._id}-${Date.now()}`,
               type: 'warning',
               title: 'Expiring Soon',
               message: `${product.name} will expire ${daysUntilExpiry ? `in ${daysUntilExpiry} days` : 'soon'}`,
@@ -219,7 +238,8 @@ const Header = ({ toggleSidebar }) => {
               icon: '⏰',
               link: `/products/${product._id}`,
               expiryDate: product.expiryDate,
-              daysUntilExpiry
+              daysUntilExpiry,
+              deletable: true
             });
           });
         }
@@ -227,10 +247,9 @@ const Header = ({ toggleSidebar }) => {
         console.log('Error fetching expiring products:', error);
       }
 
-      // Fetch today's sales (if endpoint exists)
+      // Fetch today's sales
       try {
         const todaySalesResponse = await saleService.getTodaySales();
-        console.log('Today sales response:', todaySalesResponse);
         
         if (todaySalesResponse?.data?.length > 0) {
           const totalRevenue = todaySalesResponse.todayStats?.totalRevenue || 0;
@@ -246,7 +265,8 @@ const Header = ({ toggleSidebar }) => {
             icon: '💰',
             link: '/sales',
             totalRevenue,
-            totalSales
+            totalSales,
+            deletable: true
           });
         }
       } catch (error) {
@@ -257,12 +277,10 @@ const Header = ({ toggleSidebar }) => {
       try {
         if (user?.role === 'admin') {
           const userStatsResponse = await userService.getUserStats();
-          console.log('User stats response:', userStatsResponse);
           
           if (userStatsResponse?.data) {
             const stats = userStatsResponse.data;
             
-            // Active now notification
             if (stats.activeNow > 0) {
               newNotifications.push({
                 id: `active-users-${Date.now()}`,
@@ -273,7 +291,8 @@ const Header = ({ toggleSidebar }) => {
                 read: false,
                 icon: '👥',
                 link: '/users',
-                activeNow: stats.activeNow
+                activeNow: stats.activeNow,
+                deletable: true
               });
             }
           }
@@ -282,17 +301,23 @@ const Header = ({ toggleSidebar }) => {
         console.log('Error fetching user stats:', error);
       }
 
-      // Sort by timestamp (newest first) and remove duplicates
-      const uniqueNotifications = Array.from(
-        new Map(newNotifications.map(n => [n.id, n])).values()
-      );
-      
-      const sorted = uniqueNotifications
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 15); // Increased limit to accommodate more notifications
-
-      setNotifications(sorted);
-      setUnreadCount(sorted.filter(n => !n.read).length);
+      // Merge with existing notifications (keep existing ones that are still relevant)
+      setNotifications(prevNotifications => {
+        // Create a map of existing notifications by ID
+        const existingMap = new Map(prevNotifications.map(n => [n.id, n]));
+        
+        // Add new notifications
+        newNotifications.forEach(notification => {
+          existingMap.set(notification.id, notification);
+        });
+        
+        // Convert back to array, sort by timestamp (newest first)
+        const merged = Array.from(existingMap.values())
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+          .slice(0, 50); // Limit to 50 notifications max
+        
+        return merged;
+      });
     } catch (error) {
       console.error('Error fetching notifications:', error);
     } finally {
@@ -300,13 +325,37 @@ const Header = ({ toggleSidebar }) => {
     }
   };
 
+  const deleteNotification = (notificationId, event) => {
+    event.stopPropagation(); // Prevent triggering the parent click
+    setDeletingId(notificationId);
+    
+    setTimeout(() => {
+      setNotifications(prev => {
+        const notificationToDelete = prev.find(n => n.id === notificationId);
+        const newNotifications = prev.filter(n => n.id !== notificationId);
+        
+        // Update unread count if the deleted notification was unread
+        if (notificationToDelete && !notificationToDelete.read) {
+          setUnreadCount(prevCount => Math.max(0, prevCount - 1));
+        }
+        
+        toast.success('Notification deleted');
+        return newNotifications;
+      });
+      setDeletingId(null);
+    }, 300);
+  };
+
   const markAsRead = (notificationId) => {
-    setNotifications(prev =>
-      prev.map(n =>
+    setNotifications(prev => {
+      const notification = prev.find(n => n.id === notificationId);
+      if (notification && !notification.read) {
+        setUnreadCount(prevCount => Math.max(0, prevCount - 1));
+      }
+      return prev.map(n =>
         n.id === notificationId ? { ...n, read: true } : n
-      )
-    );
-    setUnreadCount(prev => Math.max(0, prev - 1));
+      );
+    });
   };
 
   const markAllAsRead = () => {
@@ -315,6 +364,14 @@ const Header = ({ toggleSidebar }) => {
     );
     setUnreadCount(0);
     toast.success('All notifications marked as read');
+  };
+
+  const clearAllNotifications = () => {
+    if (window.confirm('Delete all notifications?')) {
+      setNotifications([]);
+      setUnreadCount(0);
+      toast.success('All notifications deleted');
+    }
   };
 
   const handleNotificationClick = (notification) => {
@@ -330,6 +387,8 @@ const Header = ({ toggleSidebar }) => {
       logout();
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      // Clear notifications on logout
+      localStorage.removeItem('notifications');
       navigate('/login');
       toast.success('Logged out successfully');
       setShowLogoutConfirm(false);
@@ -402,8 +461,6 @@ const Header = ({ toggleSidebar }) => {
           >
             <Menu className="h-6 w-6" />
           </button>
-          
-         
         </div>
         
         <div className="flex items-center space-x-2 sm:space-x-4">
@@ -449,7 +506,7 @@ const Header = ({ toggleSidebar }) => {
               )}
               {loading && (
                 <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center ring-2 ring-white dark:ring-gray-800 animate-pulse">
-                  ↻
+                  <RefreshCw className="h-3 w-3 animate-spin" />
                 </span>
               )}
             </button>
@@ -464,7 +521,7 @@ const Header = ({ toggleSidebar }) => {
                 />
                 
                 {/* Dropdown */}
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50"
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50 max-h-[600px] flex flex-col"
                      style={{ animation: 'slideDown 0.3s ease-out' }}>
                   {/* Header */}
                   <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -476,18 +533,28 @@ const Header = ({ toggleSidebar }) => {
                         </span>
                       )}
                     </h3>
-                    {unreadCount > 0 && (
-                      <button
-                        onClick={markAllAsRead}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                      >
-                        Mark all as read
-                      </button>
-                    )}
+                    <div className="flex space-x-2">
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllAsRead}
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                      {notifications.length > 0 && (
+                        <button
+                          onClick={clearAllNotifications}
+                          className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                        >
+                          Clear all
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Notifications List */}
-                  <div className="max-h-96 overflow-y-auto">
+                  <div className="overflow-y-auto flex-1">
                     {loading && notifications.length === 0 ? (
                       <div className="px-4 py-8 text-center">
                         <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
@@ -502,46 +569,57 @@ const Header = ({ toggleSidebar }) => {
                       notifications.map((notification) => (
                         <div
                           key={notification.id}
-                          onClick={() => handleNotificationClick(notification)}
-                          className={`px-4 py-3 cursor-pointer transition-all duration-200 hover:shadow-md ${
-                            getNotificationBgColor(notification.type, notification.read)
-                          } ${!notification.read ? 'border-l-4 border-l-blue-500' : ''}`}
-                          style={{ transition: 'transform 0.2s' }}
-                          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                          className={`relative group transition-all duration-300 ${
+                            deletingId === notification.id ? 'opacity-0 transform -translate-x-full' : 'opacity-100'
+                          }`}
                         >
-                          <div className="flex items-start space-x-3">
-                            <div className="flex-shrink-0 text-lg">
-                              {notification.icon || getNotificationIcon(notification.type)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {notification.title}
-                              </p>
-                              <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
-                                {notification.message}
-                              </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {getTimeAgo(notification.timestamp)}
-                              </p>
-                              
-                              {/* Additional details for specific notification types */}
-                              {notification.location && (
-                                <span className="inline-block mt-1 text-xs bg-gray-200 dark:bg-gray-700 rounded px-1.5 py-0.5">
-                                  {notification.location}
-                                </span>
-                              )}
-                              {notification.quantity !== undefined && notification.reorderLevel && (
-                                <span className="inline-block mt-1 text-xs ml-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded px-1.5 py-0.5">
-                                  {notification.quantity}/{notification.reorderLevel}
-                                </span>
-                              )}
-                            </div>
-                            {!notification.read && (
-                              <div className="flex-shrink-0">
-                                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                          <div
+                            onClick={() => handleNotificationClick(notification)}
+                            className={`px-4 py-3 cursor-pointer transition-all duration-200 hover:shadow-md ${
+                              getNotificationBgColor(notification.type, notification.read)
+                            } ${!notification.read ? 'border-l-4 border-l-blue-500' : ''}`}
+                          >
+                            <div className="flex items-start space-x-3">
+                              <div className="flex-shrink-0 text-lg">
+                                {notification.icon || getNotificationIcon(notification.type)}
                               </div>
-                            )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {notification.title}
+                                </p>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                                  {notification.message}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  {getTimeAgo(notification.timestamp)}
+                                </p>
+                                
+                                {/* Additional details for specific notification types */}
+                                {notification.location && (
+                                  <span className="inline-block mt-1 text-xs bg-gray-200 dark:bg-gray-700 rounded px-1.5 py-0.5">
+                                    {notification.location}
+                                  </span>
+                                )}
+                                {notification.quantity !== undefined && notification.reorderLevel && (
+                                  <span className="inline-block mt-1 text-xs ml-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded px-1.5 py-0.5">
+                                    {notification.quantity}/{notification.reorderLevel}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                {!notification.read && (
+                                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                                )}
+                                {/* Delete button */}
+                                <button
+                                  onClick={(e) => deleteNotification(notification.id, e)}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full"
+                                  title="Delete notification"
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))
@@ -550,13 +628,18 @@ const Header = ({ toggleSidebar }) => {
 
                   {/* Footer */}
                   {notifications.length > 0 && (
-                    <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
                       <button
                         onClick={fetchNotifications}
-                        className="text-xs text-center w-full text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors flex items-center"
+                        disabled={loading}
                       >
-                        Refresh notifications
+                        <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
                       </button>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {notifications.length} total
+                      </span>
                     </div>
                   )}
                 </div>
