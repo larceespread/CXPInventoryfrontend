@@ -241,7 +241,6 @@ const AssetForm = ({
 
       await createApprovalRequest(approvalData);
       
-      toast.success(`Your request has been submitted for approval. ${mode === 'create' ? 'Item will be created' : 'Changes will be applied'} after approval.`);
       onClose();
     } catch (error) {
       console.error('Approval submission error:', error);
@@ -581,19 +580,7 @@ const AssetForm = ({
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    Current Quantity
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={formData.storageLocations.find(l => l.location === 'BALAGTAS')?.quantity || 0}
-                    onChange={(e) => handleLocationQuantityChange('BALAGTAS', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  />
-                </div>
+              
                 
                 <div>
                   <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -635,19 +622,7 @@ const AssetForm = ({
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    Current Quantity
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={formData.storageLocations.find(l => l.location === 'MARILAO')?.quantity || 0}
-                    onChange={(e) => handleLocationQuantityChange('MARILAO', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  />
-                </div>
+           
                 
                 <div>
                   <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">

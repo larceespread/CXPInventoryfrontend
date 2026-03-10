@@ -22,10 +22,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useApproval } from '../context/ApprovalContext'; // Added import
 
 const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseToggle }) => {
   const { user } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
+  const { unreadCount } = useApproval(); // Added approval unread count
   const location = useLocation();
 
   // Auto-close mobile sidebar when route changes
@@ -44,7 +46,12 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
   ];
 
   // Add Approvals for all users (they will see different content based on role)
-  const approvalsNav = { name: 'Approvals', href: '/approvals', icon: CheckSquare };
+  const approvalsNav = { 
+    name: 'Approvals', 
+    href: '/approvals', 
+    icon: CheckSquare,
+    badge: unreadCount > 0 ? unreadCount : null // Added badge count
+  };
 
   // Admin only routes
   const adminNavigation = [
@@ -146,7 +153,7 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
                     onClick={handleLinkClick}
                     className={`
                       group flex items-center px-3 py-2.5 text-sm font-medium rounded-xl
-                      transition-all duration-150
+                      transition-all duration-150 relative
                       ${isActive
                         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm'
                         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -160,10 +167,27 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
                       h-5 w-5 flex-shrink-0
                       ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'}
                     `} />
+                    
                     {!isCollapsed && (
-                      <span className="truncate">{item.name}</span>
+                      <>
+                        <span className="truncate flex-1">{item.name}</span>
+                        {/* Notification badge for desktop expanded sidebar */}
+                        {item.badge && (
+                          <span className="ml-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-500 rounded-full min-w-[20px] h-5">
+                            {item.badge}
+                          </span>
+                        )}
+                      </>
                     )}
-                    {!isCollapsed && isActive && (
+                    
+                    {/* Notification badge for collapsed sidebar */}
+                    {isCollapsed && item.badge && (
+                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-red-500 rounded-full min-w-[18px] h-[18px]">
+                        {item.badge}
+                      </span>
+                    )}
+                    
+                    {!isCollapsed && isActive && !item.badge && (
                       <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
                     )}
                   </Link>
@@ -171,8 +195,6 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
               })}
             </div>
           </div>
-
-       
         </div>
       </div>
 
@@ -227,7 +249,7 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
                     onClick={handleLinkClick}
                     className={`
                       group flex items-center px-4 py-3 text-base font-medium rounded-xl
-                      transition-all duration-150
+                      transition-all duration-150 relative
                       ${isActive
                         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm'
                         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -238,7 +260,15 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
                       isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'
                     }`} />
                     <span className="flex-1">{item.name}</span>
-                    {isActive && (
+                    
+                    {/* Notification badge for mobile */}
+                    {item.badge && (
+                      <span className="mr-2 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-500 rounded-full min-w-[20px] h-5">
+                        {item.badge}
+                      </span>
+                    )}
+                    
+                    {isActive && !item.badge && (
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400" />
                     )}
                   </Link>

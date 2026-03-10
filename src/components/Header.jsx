@@ -1,5 +1,5 @@
 // components/Header.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Menu, Bell, LogOut, AlertCircle, X, Sun, Moon, Trash2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -25,6 +25,17 @@ const Header = ({ toggleSidebar }) => {
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [selectedApproval, setSelectedApproval] = useState(null);
+  
+  // Use a ref to always have access to the latest dismissedNotifications
+  const dismissedNotificationsRef = useRef(new Set());
+  
+  // State for dismissed notifications (initialize from localStorage)
+  const [dismissedNotifications, setDismissedNotifications] = useState(() => {
+    const saved = localStorage.getItem('dismissedNotifications');
+    const initialSet = saved ? new Set(JSON.parse(saved)) : new Set();
+    dismissedNotificationsRef.current = initialSet;
+    return initialSet;
+  });
 
   // Load notifications from localStorage on mount
   useEffect(() => {
@@ -37,8 +48,11 @@ const Header = ({ toggleSidebar }) => {
           ...n,
           timestamp: new Date(n.timestamp)
         }));
-        setNotifications(withDates);
-        setUnreadCount(withDates.filter(n => !n.read).length);
+        
+        // Filter out dismissed notifications using the ref
+        const filtered = withDates.filter(n => !dismissedNotificationsRef.current.has(n.id));
+        setNotifications(filtered);
+        setUnreadCount(filtered.filter(n => !n.read).length);
       } catch (error) {
         console.error('Error loading saved notifications:', error);
       }
@@ -63,7 +77,14 @@ const Header = ({ toggleSidebar }) => {
     localStorage.setItem('notifications', JSON.stringify(notifications));
   }, [notifications]);
 
-  const fetchNotifications = async () => {
+  // Save dismissed notifications to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('dismissedNotifications', JSON.stringify([...dismissedNotifications]));
+    // Update the ref whenever dismissedNotifications changes
+    dismissedNotificationsRef.current = dismissedNotifications;
+  }, [dismissedNotifications]);
+
+  const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
       const newNotifications = [];
@@ -338,13 +359,19 @@ const Header = ({ toggleSidebar }) => {
         console.log('Error fetching user stats:', error);
       }
 
-      // Merge with existing notifications (keep existing ones that are still relevant)
+      // Filter out dismissed notifications using the ref (always has latest value)
+      const filteredNewNotifications = newNotifications.filter(n => !dismissedNotificationsRef.current.has(n.id));
+
+      // Merge with existing notifications (keep existing ones that are still relevant and not dismissed)
       setNotifications(prevNotifications => {
-        // Create a map of existing notifications by ID
-        const existingMap = new Map(prevNotifications.map(n => [n.id, n]));
+        // Filter out dismissed notifications from existing ones using the ref
+        const filteredPrev = prevNotifications.filter(n => !dismissedNotificationsRef.current.has(n.id));
         
-        // Add new notifications
-        newNotifications.forEach(notification => {
+        // Create a map of existing notifications by ID
+        const existingMap = new Map(filteredPrev.map(n => [n.id, n]));
+        
+        // Add new notifications (that aren't dismissed)
+        filteredNewNotifications.forEach(notification => {
           existingMap.set(notification.id, notification);
         });
         
@@ -364,11 +391,18 @@ const Header = ({ toggleSidebar }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, pendingApprovals]); // Add dependencies
 
   const deleteNotification = (notificationId, event) => {
     event.stopPropagation(); // Prevent triggering the parent click
     setDeletingId(notificationId);
+    
+    // Add to dismissed notifications set
+    setDismissedNotifications(prev => {
+      const newSet = new Set(prev);
+      newSet.add(notificationId);
+      return newSet;
+    });
     
     setTimeout(() => {
       setNotifications(prev => {
@@ -380,7 +414,7 @@ const Header = ({ toggleSidebar }) => {
           setUnreadCount(prevCount => Math.max(0, prevCount - 1));
         }
         
-        toast.success('Notification deleted');
+        toast.success('Notification deleted permanently');
         return newNotifications;
       });
       setDeletingId(null);
@@ -408,10 +442,17 @@ const Header = ({ toggleSidebar }) => {
   };
 
   const clearAllNotifications = () => {
-    if (window.confirm('Delete all notifications?')) {
+    if (window.confirm('Delete all notifications permanently?')) {
+      // Add all current notification IDs to dismissed set
+      setDismissedNotifications(prev => {
+        const newSet = new Set(prev);
+        notifications.forEach(n => newSet.add(n.id));
+        return newSet;
+      });
+      
       setNotifications([]);
       setUnreadCount(0);
-      toast.success('All notifications deleted');
+      toast.success('All notifications deleted permanently');
     }
   };
 
@@ -443,6 +484,8 @@ const Header = ({ toggleSidebar }) => {
       localStorage.removeItem('user');
       // Clear notifications on logout
       localStorage.removeItem('notifications');
+      // Optionally clear dismissed notifications on logout
+      localStorage.removeItem('dismissedNotifications');
       navigate('/login');
       toast.success('Logged out successfully');
       setShowLogoutConfirm(false);
@@ -670,7 +713,7 @@ const Header = ({ toggleSidebar }) => {
                                     <button
                                       onClick={(e) => deleteNotification(notification.id, e)}
                                       className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full"
-                                      title="Delete notification"
+                                      title="Delete notification permanently"
                                     >
                                       <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
                                     </button>

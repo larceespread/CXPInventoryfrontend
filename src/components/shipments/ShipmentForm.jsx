@@ -16,7 +16,8 @@ import {
   AlertCircle,
   CheckCircle,
   Info,
-  Filter
+  Filter,
+  Calendar
 } from 'lucide-react';
 import { useShipment } from '../../context/ShipmentContext';
 import { productService } from '../../services/productService';
@@ -42,6 +43,8 @@ const STORAGE_KEYS = {
   BULK_REMARKS: 'shipment_bulk_remarks',
   STOCK_FILTER: 'shipment_stock_filter',
   LOCATION_FILTER: 'shipment_location_filter',
+  DATE_RANGE_START: 'shipment_date_range_start',
+  DATE_RANGE_END: 'shipment_date_range_end',
   TIMESTAMP: 'shipment_form_timestamp'
 };
 
@@ -129,6 +132,26 @@ const clearShipmentStorage = () => {
   });
 };
 
+// Format date range for display
+const formatDateRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return '';
+  if (startDate && !endDate) return startDate;
+  if (!startDate && endDate) return endDate;
+  
+  const start = new Date(startDate).toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    year: 'numeric'
+  });
+  const end = new Date(endDate).toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    year: 'numeric'
+  });
+  
+  return `${start} - ${end}`;
+};
+
 const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = false }) => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -136,6 +159,15 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
   
   // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  
+  // Date range picker state
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [dateRangeStart, setDateRangeStart] = useState(() => {
+    return loadFromLocalStorage(STORAGE_KEYS.DATE_RANGE_START) || '';
+  });
+  const [dateRangeEnd, setDateRangeEnd] = useState(() => {
+    return loadFromLocalStorage(STORAGE_KEYS.DATE_RANGE_END) || '';
+  });
   
   // Determine if we're editing and which shipment to use
   const isEditing = !!(id || propShipment);
@@ -317,6 +349,34 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
   useEffect(() => {
     saveToLocalStorage(STORAGE_KEYS.LOCATION_FILTER, locationFilter);
   }, [locationFilter]);
+
+  useEffect(() => {
+    saveToLocalStorage(STORAGE_KEYS.DATE_RANGE_START, dateRangeStart);
+  }, [dateRangeStart]);
+
+  useEffect(() => {
+    saveToLocalStorage(STORAGE_KEYS.DATE_RANGE_END, dateRangeEnd);
+  }, [dateRangeEnd]);
+
+  // Update formData.datesCovered when date range changes
+  useEffect(() => {
+    if (dateRangeStart && dateRangeEnd) {
+      setFormData(prev => ({
+        ...prev,
+        datesCovered: formatDateRange(dateRangeStart, dateRangeEnd)
+      }));
+    } else if (dateRangeStart && !dateRangeEnd) {
+      setFormData(prev => ({
+        ...prev,
+        datesCovered: dateRangeStart
+      }));
+    } else if (!dateRangeStart && dateRangeEnd) {
+      setFormData(prev => ({
+        ...prev,
+        datesCovered: dateRangeEnd
+      }));
+    }
+  }, [dateRangeStart, dateRangeEnd]);
 
   // Load shipment if editing
   useEffect(() => {
@@ -699,6 +759,18 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
     setQuantityErrors(newErrors);
     
     toast.success('Bulk settings applied to all selected items');
+  };
+
+  const handleDateRangeSelect = (start, end) => {
+    setDateRangeStart(start);
+    setDateRangeEnd(end);
+    setShowDatePicker(false);
+  };
+
+  const handleClearDateRange = () => {
+    setDateRangeStart('');
+    setDateRangeEnd('');
+    setFormData(prev => ({ ...prev, datesCovered: '' }));
   };
 
   const getFilteredProducts = () => {
@@ -1109,13 +1181,26 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Dates Covered:
               </label>
-              <input
-                type="text"
-                value={formData.datesCovered}
-                onChange={(e) => setFormData({ ...formData, datesCovered: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                placeholder="e.g., Jan 1-5, 2024"
-              />
+              <div className="relative">
+                <div 
+                  onClick={() => setShowDatePicker(true)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white cursor-pointer flex items-center justify-between"
+                >
+                  <span className={formData.datesCovered ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}>
+                    {formData.datesCovered || 'Select date range...'}
+                  </span>
+                  <Calendar className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                </div>
+                {formData.datesCovered && (
+                  <button
+                    type="button"
+                    onClick={handleClearDateRange}
+                    className="absolute right-10 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1426,6 +1511,142 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
                 className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors duration-200"
               >
                 Yes, Create Shipment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Range Picker Modal */}
+      {showDatePicker && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 transition-colors duration-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white flex items-center">
+                <Calendar className="h-5 w-5 mr-2 text-blue-500" />
+                Select Date Range
+              </h3>
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={dateRangeStart}
+                  onChange={(e) => setDateRangeStart(e.target.value)}
+                  max={dateRangeEnd || undefined}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={dateRangeEnd}
+                  onChange={(e) => setDateRangeEnd(e.target.value)}
+                  min={dateRangeStart || undefined}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              {/* Quick Select Options */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quick Select</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      handleDateRangeSelect(today, today);
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      const tomorrow = new Date(today);
+                      tomorrow.setDate(tomorrow.getDate() + 1);
+                      handleDateRangeSelect(
+                        today.toISOString().split('T')[0],
+                        tomorrow.toISOString().split('T')[0]
+                      );
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Today - Tomorrow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      const nextWeek = new Date(today);
+                      nextWeek.setDate(nextWeek.getDate() + 7);
+                      handleDateRangeSelect(
+                        today.toISOString().split('T')[0],
+                        nextWeek.toISOString().split('T')[0]
+                      );
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Next 7 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      const nextMonth = new Date(today);
+                      nextMonth.setMonth(nextMonth.getMonth() + 1);
+                      handleDateRangeSelect(
+                        today.toISOString().split('T')[0],
+                        nextMonth.toISOString().split('T')[0]
+                      );
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Next 30 Days
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (dateRangeStart && dateRangeEnd) {
+                    handleDateRangeSelect(dateRangeStart, dateRangeEnd);
+                  } else if (dateRangeStart && !dateRangeEnd) {
+                    handleDateRangeSelect(dateRangeStart, dateRangeStart);
+                  } else if (!dateRangeStart && dateRangeEnd) {
+                    handleDateRangeSelect(dateRangeEnd, dateRangeEnd);
+                  } else {
+                    toast.error('Please select at least one date');
+                  }
+                }}
+                disabled={!dateRangeStart && !dateRangeEnd}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Apply
               </button>
             </div>
           </div>
