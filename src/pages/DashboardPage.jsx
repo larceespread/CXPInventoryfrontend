@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext'
 import { useShipment } from '../context/ShipmentContext.jsx'
 import { productService } from '../services/productService'
 import { dashboardService } from '../services/dashboardService'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, AlertTriangle } from 'lucide-react'
 
 const DashboardPage = () => {
   const navigate = useNavigate()
@@ -29,8 +29,12 @@ const DashboardPage = () => {
   const [formMode, setFormMode] = useState('stockin')
   const [shipments, setShipments] = useState([])
   const [stats, setStats] = useState({})
+  const [permissionErrors, setPermissionErrors] = useState([])
   const { user } = useAuth()
   const { fetchShipments: fetchApiShipments, fetchPendingReturns } = useShipment()
+
+  // Check if user has admin or manager role
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'manager'
 
   useEffect(() => {
     loadDashboardData()
@@ -44,32 +48,67 @@ const DashboardPage = () => {
         setLoading(true)
       }
       
-      // Fetch all data in parallel
-      const [
-        productsResponse,
-        dashboardStats,
-        nonSellableSummary,
-        inTransitItems,
-        lowStockItems,
-        outOfStockItems,
-        shipmentsResponse,
-        pendingReturnsResponse
-      ] = await Promise.all([
-        productService.getProducts({ limit: 1000 }),
-        dashboardService.getStats(),
-        dashboardService.getNonSellableReport(),
-        dashboardService.getInTransitItems(),
-        dashboardService.getLowStockItems(),
-        dashboardService.getOutOfStockItems(),
-        fetchApiShipments({ limit: 100 }).catch(() => ({ data: [] })),
-        fetchPendingReturns().catch(() => [])
-      ])
+      setPermissionErrors([])
+      const errors = []
+      
+      // Base promises that all users can access
+      const promises = [
+        productService.getProducts({ limit: 1000 }).catch(err => {
+          if (err.response?.status === 403) errors.push('products')
+          return { data: [] }
+        }),
+        dashboardService.getStats().catch(err => {
+          if (err.response?.status === 403) errors.push('stats')
+          return { data: {} }
+        }),
+        dashboardService.getInTransitItems().catch(err => {
+          if (err.response?.status === 403) errors.push('inTransit')
+          return { data: [] }
+        }),
+        dashboardService.getLowStockItems().catch(err => {
+          if (err.response?.status === 403) errors.push('lowStock')
+          return { data: [] }
+        }),
+        dashboardService.getOutOfStockItems().catch(err => {
+          if (err.response?.status === 403) errors.push('outOfStock')
+          return { data: [] }
+        }),
+        fetchApiShipments({ limit: 100 }).catch(err => {
+          if (err.response?.status === 403) errors.push('shipments')
+          return { data: [] }
+        }),
+        fetchPendingReturns().catch(err => {
+          if (err.response?.status === 403) errors.push('pendingReturns')
+          return []
+        })
+      ];
+
+      // Only include non-sellable report if user is admin or manager
+      if (isAdminOrManager) {
+        promises.push(
+          dashboardService.getNonSellableReport().catch(err => {
+            if (err.response?.status === 403) errors.push('nonSellable')
+            return { data: { totalItems: 0, items: [] } }
+          })
+        );
+      } else {
+        // Push a dummy promise that resolves immediately for non-admin users
+        promises.push(Promise.resolve({ data: { totalItems: 0, items: [] } }));
+      }
+
+      const results = await Promise.allSettled(promises);
+
+      if (errors.length > 0) {
+        setPermissionErrors([...new Set(errors)]) // Remove duplicates
+      }
 
       // Process products data
+      const productsResponse = results[0].status === 'fulfilled' ? results[0].value : { data: [] }
       const products = productsResponse.data || []
       setInventory(products)
 
       // Process dashboard stats
+      const dashboardStats = results[1].status === 'fulfilled' ? results[1].value : { data: {} }
       const statsData = dashboardStats.data || {}
       
       // Calculate additional stats
@@ -97,6 +136,25 @@ const DashboardPage = () => {
         byCategory[category] += (item.quantity || item.qty || 0)
       })
 
+      // Process in-transit data
+      const inTransitData = results[2].status === 'fulfilled' ? results[2].value.data || [] : []
+
+      // Process low stock data
+      const lowStockData = results[3].status === 'fulfilled' ? results[3].value.data || [] : []
+
+      // Process out of stock data
+      const outOfStockData = results[4].status === 'fulfilled' ? results[4].value.data || [] : []
+
+      // Process shipments
+      const shipmentsResponse = results[5].status === 'fulfilled' ? results[5].value : { data: [] }
+      setShipments(shipmentsResponse.data || [])
+
+      // Process pending returns
+      const pendingReturnsResponse = results[6].status === 'fulfilled' ? results[6].value : []
+      
+      // Process non-sellable data (index 7)
+      const nonSellableData = results[7]?.status === 'fulfilled' ? results[7].value.data || { totalItems: 0 } : { totalItems: 0 }
+      
       // Calculate pending returns stats
       let totalPendingQty = 0
       if (pendingReturnsResponse && pendingReturnsResponse.length > 0) {
@@ -117,21 +175,19 @@ const DashboardPage = () => {
         inventoryStats: {
           totalQuantity,
           availableQuantity,
-          borrowedQuantity: inTransitItems.data?.length || 0,
+          borrowedQuantity: inTransitData.length,
           byLocation,
           byCategory
         },
-        nonSellableStats: nonSellableSummary.data || { totalItems: 0 },
-        lowStockProducts: lowStockItems.data || [],
-        outOfStockProducts: outOfStockItems.data || [],
-        notReturnedProducts: inTransitItems.data || [],
+        nonSellableStats: nonSellableData,
+        lowStockProducts: lowStockData,
+        outOfStockProducts: outOfStockData,
+        notReturnedProducts: inTransitData,
         pendingReturns: pendingReturnsResponse || [],
         user: {
           name: user?.name || 'Admin User'
         }
       })
-
-      setShipments(shipmentsResponse.data || [])
       
       // Calculate stats for tabs
       setStats({
@@ -140,13 +196,15 @@ const DashboardPage = () => {
         ship: shipmentsResponse.data?.length || 0,
         pendingReturns: totalPendingQty,
         pending: shipmentsResponse.data?.length || 0,
-        notifications: (lowStockItems.data?.length || 0) + 
-                      (outOfStockItems.data?.length || 0) +
-                      (inTransitItems.data?.length || 0)
+        notifications: lowStockData.length + outOfStockData.length + inTransitData.length
       })
 
       if (showRefreshToast) {
-        toast.success('Dashboard data refreshed')
+        if (errors.length > 0) {
+          toast.success('Dashboard data refreshed with some permission limitations')
+        } else {
+          toast.success('Dashboard data refreshed')
+        }
       }
 
     } catch (error) {
@@ -543,6 +601,27 @@ const DashboardPage = () => {
             {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
+        
+        {/* Permission Errors Banner */}
+        {permissionErrors.length > 0 && (
+          <div className="mt-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+            <div className="flex items-start">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 mr-3" />
+              <div>
+                <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                  Some data is unavailable due to permission restrictions
+                </h3>
+                <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
+                  You don't have permission to view: {permissionErrors.join(', ')}. 
+                  {permissionErrors.includes('nonSellable') && (
+                    <span className="block mt-1">Non-sellable items are only visible to administrators and managers.</span>
+                  )}
+                  Contact your administrator if you need access.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <AssetTabs stats={stats} onTabChange={setActiveTab} activeTab={activeTab} />

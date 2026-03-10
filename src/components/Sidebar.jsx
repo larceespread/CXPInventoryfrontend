@@ -1,3 +1,4 @@
+// components/Sidebar.jsx
 import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -16,7 +17,8 @@ import {
   X,
   Sun,
   Moon,
-  RotateCcw // Added for Pending Returns
+  RotateCcw,
+  CheckSquare // Added for Approvals
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -33,6 +35,7 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
     }
   }, [location.pathname, isMobile, isOpen, onClose]);
 
+  // Base navigation for all users
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Shipments', href: '/shipments', icon: Truck },
@@ -40,15 +43,20 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
     { name: 'Brands', href: '/brands', icon: Building2 },
   ];
 
+  // Add Approvals for all users (they will see different content based on role)
+  const approvalsNav = { name: 'Approvals', href: '/approvals', icon: CheckSquare };
+
   // Admin only routes
   const adminNavigation = [
     { name: 'Users', href: '/users', icon: Users },
   ];
 
   // Combine based on role
-  const filteredNavigation = user?.role === 'admin' 
-    ? [...navigation, ...adminNavigation]
-    : navigation;
+  let filteredNavigation = [...navigation, approvalsNav];
+  
+  if (user?.role === 'admin') {
+    filteredNavigation = [...filteredNavigation, ...adminNavigation];
+  }
 
   // Handle link click on mobile
   const handleLinkClick = () => {
@@ -129,7 +137,7 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
               {filteredNavigation.map((item) => {
                 const isActive = location.pathname === item.href || 
                                 (item.href === '/shipments' && location.pathname.startsWith('/shipments/')) ||
-                                (item.href === '/shipments/pending-returns' && location.pathname === '/shipments/pending-returns') ||
+                                (item.href === '/approvals' && location.pathname === '/approvals') ||
                                 (item.href === '/products' && location.pathname.startsWith('/products/'));
                 return (
                   <Link
@@ -210,7 +218,7 @@ const Sidebar = ({ isOpen, onClose, isMobile, onToggle, isCollapsed, onCollapseT
               {filteredNavigation.map((item) => {
                 const isActive = location.pathname === item.href || 
                                 (item.href === '/shipments' && location.pathname.startsWith('/shipments/')) ||
-                                (item.href === '/shipments/pending-returns' && location.pathname === '/shipments/pending-returns') ||
+                                (item.href === '/approvals' && location.pathname === '/approvals') ||
                                 (item.href === '/products' && location.pathname.startsWith('/products/'));
                 return (
                   <Link

@@ -1,3 +1,4 @@
+// services/api.js
 import axios from 'axios';
 
 // Determine the base URL based on environment
@@ -99,6 +100,12 @@ api.interceptors.response.use(
             }
             
             error.message = 'Cannot connect to server. Please check your internet connection or try again later.';
+        }
+        
+        // Handle 403 Forbidden - User doesn't have permission
+        if (error.response?.status === 403) {
+            console.warn('⚠️ Access forbidden. User may not have required permissions for:', originalRequest?.url);
+            // Don't redirect for 403, just log it
         }
         
         // Handle unauthorized errors (token expired)

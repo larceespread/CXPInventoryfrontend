@@ -141,7 +141,7 @@ export const AuthProvider = ({ children }) => {
     authService.logout();
     setUser(null);
     setToken(null);
-    toast.success('Logged out successfully');
+ 
   };
 
   // Helper function to check user roles

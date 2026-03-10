@@ -3,16 +3,19 @@ import React, { useState, useEffect } from 'react';
 import { Menu, Bell, LogOut, AlertCircle, X, Sun, Moon, Trash2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useApproval } from '../context/ApprovalContext';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { productService } from '../services/productService';
 import { shipmentService } from '../services/shipmentService';
 import { userService } from '../services/userService';
 import { saleService } from '../services/saleService';
+import ApprovalModal from './ApprovalModal';
 
 const Header = ({ toggleSidebar }) => {
   const { user, logout } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
+  const { pendingApprovals, fetchPendingApprovals, fetchMyRequests } = useApproval();
   const navigate = useNavigate();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -21,6 +24,7 @@ const Header = ({ toggleSidebar }) => {
   const [isAnimating, setIsAnimating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [selectedApproval, setSelectedApproval] = useState(null);
 
   // Load notifications from localStorage on mount
   useEffect(() => {
@@ -48,6 +52,12 @@ const Header = ({ toggleSidebar }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // Update notifications when pendingApprovals changes
+  useEffect(() => {
+    // Refresh notifications to show updated approval status
+    fetchNotifications();
+  }, [pendingApprovals]);
+
   // Save notifications to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('notifications', JSON.stringify(notifications));
@@ -57,6 +67,33 @@ const Header = ({ toggleSidebar }) => {
     try {
       setLoading(true);
       const newNotifications = [];
+
+      // Fetch pending approvals (only for admin/manager)
+      if (user?.role === 'admin' || user?.role === 'manager') {
+        try {
+          if (pendingApprovals && pendingApprovals.length > 0) {
+            pendingApprovals.slice(0, 5).forEach(approval => {
+              const action = approval.requestType === 'create' ? 'added' : 
+                            approval.requestType === 'edit' ? 'updated' : 'deleted';
+              
+              newNotifications.push({
+                id: `approval-${approval._id}-${Date.now()}`,
+                type: 'warning',
+                title: `Pending ${approval.requestType} Request`,
+                message: `${approval.requestedBy?.name || 'A user'} requested to ${action} "${approval.data?.name || 'an item'}"`,
+                timestamp: new Date(approval.createdAt),
+                read: false,
+                icon: '📋',
+                approvalId: approval._id,
+                deletable: false, // Don't allow deletion of approval notifications
+                approvalData: approval // Store full approval data for modal
+              });
+            });
+          }
+        } catch (error) {
+          console.log('Error processing pending approvals:', error);
+        }
+      }
 
       // Fetch low stock products
       try {
@@ -316,6 +353,10 @@ const Header = ({ toggleSidebar }) => {
           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
           .slice(0, 50); // Limit to 50 notifications max
         
+        // Update unread count
+        const newUnreadCount = merged.filter(n => !n.read).length;
+        setUnreadCount(newUnreadCount);
+        
         return merged;
       });
     } catch (error) {
@@ -376,10 +417,23 @@ const Header = ({ toggleSidebar }) => {
 
   const handleNotificationClick = (notification) => {
     markAsRead(notification.id);
-    if (notification.link) {
+    
+    if (notification.approvalData) {
+      // Open approval modal for pending approvals
+      setSelectedApproval(notification.approvalData);
+    } else if (notification.link) {
       navigate(notification.link);
     }
     setShowNotifications(false);
+  };
+
+  const handleApprovalComplete = async () => {
+    setSelectedApproval(null);
+    // Refresh both the approval context and notifications
+    await fetchPendingApprovals();
+    await fetchMyRequests();
+    await fetchNotifications();
+    toast.success('Request processed successfully');
   };
 
   const handleLogout = () => {
@@ -450,372 +504,385 @@ const Header = ({ toggleSidebar }) => {
   };
 
   return (
-    <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-colors duration-200">
-      <div className="flex justify-between items-center px-4 py-3 sm:px-6 lg:px-8">
-        <div className="flex items-center">
-          {/* Mobile menu button - only visible on mobile */}
-          <button 
-            onClick={toggleSidebar} 
-            className="lg:hidden text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 mr-2"
-            aria-label="Toggle menu"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-        </div>
-        
-        <div className="flex items-center space-x-2 sm:space-x-4">
-          {/* Dark Mode Toggle with Animation */}
-          <button
-            onClick={handleToggleDarkMode}
-            className={`relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300 transform ${
-              isAnimating ? (isDarkMode ? 'rotate-180 scale-110' : '-rotate-180 scale-110') : ''
-            }`}
-            aria-label="Toggle dark mode"
-          >
-            <div className="relative">
-              <Sun 
-                className={`h-5 w-5 transition-all duration-300 ${
-                  isDarkMode ? 'opacity-0 rotate-90 scale-0' : 'opacity-100 rotate-0 scale-100'
-                } text-yellow-500`} 
-              />
-              <Moon 
-                className={`absolute inset-0 h-5 w-5 transition-all duration-300 ${
-                  isDarkMode ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-0'
-                }`} 
-              />
-            </div>
-          </button>
-          
-          {/* Notification Bell with Dynamic Badge */}
-          <div className="relative">
+    <>
+      <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 transition-colors duration-200">
+        <div className="flex justify-between items-center px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center">
+            {/* Mobile menu button - only visible on mobile */}
             <button 
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="relative text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 group"
-              aria-label="Notifications"
-              disabled={loading}
+              onClick={toggleSidebar} 
+              className="lg:hidden text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 mr-2"
+              aria-label="Toggle menu"
             >
-              <Bell className="h-5 w-5 sm:h-6 sm:w-6 group-hover:scale-110 transition-transform duration-200" />
-              {unreadCount > 0 && (
-                <>
-                  <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800 animate-ping" />
-                  <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800" />
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center ring-2 ring-white dark:ring-gray-800">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                </>
-              )}
-              {loading && (
-                <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center ring-2 ring-white dark:ring-gray-800 animate-pulse">
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                </span>
-              )}
+              <Menu className="h-6 w-6" />
             </button>
-
-            {/* Notifications dropdown */}
-            {showNotifications && (
-              <>
-                {/* Backdrop for mobile */}
-                <div 
-                  className="fixed inset-0 z-40 lg:hidden"
-                  onClick={() => setShowNotifications(false)}
+          </div>
+          
+          <div className="flex items-center space-x-2 sm:space-x-4">
+            {/* Dark Mode Toggle with Animation */}
+            <button
+              onClick={handleToggleDarkMode}
+              className={`relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300 transform ${
+                isAnimating ? (isDarkMode ? 'rotate-180 scale-110' : '-rotate-180 scale-110') : ''
+              }`}
+              aria-label="Toggle dark mode"
+            >
+              <div className="relative">
+                <Sun 
+                  className={`h-5 w-5 transition-all duration-300 ${
+                    isDarkMode ? 'opacity-0 rotate-90 scale-0' : 'opacity-100 rotate-0 scale-100'
+                  } text-yellow-500`} 
                 />
-                
-                {/* Dropdown */}
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50 max-h-[600px] flex flex-col"
-                     style={{ animation: 'slideDown 0.3s ease-out' }}>
-                  {/* Header */}
-                  <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Notifications
-                      {unreadCount > 0 && (
-                        <span className="ml-2 text-xs bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 px-2 py-0.5 rounded-full">
-                          {unreadCount} new
-                        </span>
-                      )}
-                    </h3>
-                    <div className="flex space-x-2">
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={markAllAsRead}
-                          className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                      {notifications.length > 0 && (
-                        <button
-                          onClick={clearAllNotifications}
-                          className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
-                        >
-                          Clear all
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                <Moon 
+                  className={`absolute inset-0 h-5 w-5 transition-all duration-300 ${
+                    isDarkMode ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-0'
+                  }`} 
+                />
+              </div>
+            </button>
+            
+            {/* Notification Bell with Dynamic Badge */}
+            <div className="relative">
+              <button 
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="relative text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 group"
+                aria-label="Notifications"
+                disabled={loading}
+              >
+                <Bell className="h-5 w-5 sm:h-6 sm:w-6 group-hover:scale-110 transition-transform duration-200" />
+                {unreadCount > 0 && (
+                  <>
+                    <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800 animate-ping" />
+                    <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800" />
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center ring-2 ring-white dark:ring-gray-800">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  </>
+                )}
+                {loading && (
+                  <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center ring-2 ring-white dark:ring-gray-800 animate-pulse">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  </span>
+                )}
+              </button>
 
-                  {/* Notifications List */}
-                  <div className="overflow-y-auto flex-1">
-                    {loading && notifications.length === 0 ? (
-                      <div className="px-4 py-8 text-center">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Loading notifications...</p>
-                      </div>
-                    ) : notifications.length === 0 ? (
-                      <div className="px-4 py-8 text-center">
-                        <Bell className="h-8 w-8 mx-auto text-gray-400 dark:text-gray-600 mb-2" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400">No notifications</p>
-                      </div>
-                    ) : (
-                      notifications.map((notification) => (
-                        <div
-                          key={notification.id}
-                          className={`relative group transition-all duration-300 ${
-                            deletingId === notification.id ? 'opacity-0 transform -translate-x-full' : 'opacity-100'
-                          }`}
-                        >
-                          <div
-                            onClick={() => handleNotificationClick(notification)}
-                            className={`px-4 py-3 cursor-pointer transition-all duration-200 hover:shadow-md ${
-                              getNotificationBgColor(notification.type, notification.read)
-                            } ${!notification.read ? 'border-l-4 border-l-blue-500' : ''}`}
+              {/* Notifications dropdown */}
+              {showNotifications && (
+                <>
+                  {/* Backdrop for mobile */}
+                  <div 
+                    className="fixed inset-0 z-40 lg:hidden"
+                    onClick={() => setShowNotifications(false)}
+                  />
+                  
+                  {/* Dropdown */}
+                  <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50 max-h-[600px] flex flex-col"
+                       style={{ animation: 'slideDown 0.3s ease-out' }}>
+                    {/* Header */}
+                    <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        Notifications
+                        {unreadCount > 0 && (
+                          <span className="ml-2 text-xs bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 px-2 py-0.5 rounded-full">
+                            {unreadCount} new
+                          </span>
+                        )}
+                      </h3>
+                      <div className="flex space-x-2">
+                        {unreadCount > 0 && (
+                          <button
+                            onClick={markAllAsRead}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                           >
-                            <div className="flex items-start space-x-3">
-                              <div className="flex-shrink-0 text-lg">
-                                {notification.icon || getNotificationIcon(notification.type)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                  {notification.title}
-                                </p>
-                                <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
-                                  {notification.message}
-                                </p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                  {getTimeAgo(notification.timestamp)}
-                                </p>
-                                
-                                {/* Additional details for specific notification types */}
-                                {notification.location && (
-                                  <span className="inline-block mt-1 text-xs bg-gray-200 dark:bg-gray-700 rounded px-1.5 py-0.5">
-                                    {notification.location}
-                                  </span>
-                                )}
-                                {notification.quantity !== undefined && notification.reorderLevel && (
-                                  <span className="inline-block mt-1 text-xs ml-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded px-1.5 py-0.5">
-                                    {notification.quantity}/{notification.reorderLevel}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center space-x-1">
-                                {!notification.read && (
-                                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
-                                )}
-                                {/* Delete button */}
-                                <button
-                                  onClick={(e) => deleteNotification(notification.id, e)}
-                                  className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full"
-                                  title="Delete notification"
-                                >
-                                  <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
-                                </button>
+                            Mark all read
+                          </button>
+                        )}
+                        {notifications.length > 0 && (
+                          <button
+                            onClick={clearAllNotifications}
+                            className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Notifications List */}
+                    <div className="overflow-y-auto flex-1">
+                      {loading && notifications.length === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">Loading notifications...</p>
+                        </div>
+                      ) : notifications.length === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                          <Bell className="h-8 w-8 mx-auto text-gray-400 dark:text-gray-600 mb-2" />
+                          <p className="text-sm text-gray-500 dark:text-gray-400">No notifications</p>
+                        </div>
+                      ) : (
+                        notifications.map((notification) => (
+                          <div
+                            key={notification.id}
+                            className={`relative group transition-all duration-300 ${
+                              deletingId === notification.id ? 'opacity-0 transform -translate-x-full' : 'opacity-100'
+                            }`}
+                          >
+                            <div
+                              onClick={() => handleNotificationClick(notification)}
+                              className={`px-4 py-3 cursor-pointer transition-all duration-200 hover:shadow-md ${
+                                getNotificationBgColor(notification.type, notification.read)
+                              } ${!notification.read ? 'border-l-4 border-l-blue-500' : ''}`}
+                            >
+                              <div className="flex items-start space-x-3">
+                                <div className="flex-shrink-0 text-lg">
+                                  {notification.icon || getNotificationIcon(notification.type)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    {notification.title}
+                                  </p>
+                                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                                    {notification.message}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {getTimeAgo(notification.timestamp)}
+                                  </p>
+                                  
+                                  {/* Additional details for specific notification types */}
+                                  {notification.location && (
+                                    <span className="inline-block mt-1 text-xs bg-gray-200 dark:bg-gray-700 rounded px-1.5 py-0.5">
+                                      {notification.location}
+                                    </span>
+                                  )}
+                                  {notification.quantity !== undefined && notification.reorderLevel && (
+                                    <span className="inline-block mt-1 text-xs ml-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded px-1.5 py-0.5">
+                                      {notification.quantity}/{notification.reorderLevel}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                  {!notification.read && (
+                                    <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                                  )}
+                                  {/* Delete button - only show for deletable notifications */}
+                                  {notification.deletable && (
+                                    <button
+                                      onClick={(e) => deleteNotification(notification.id, e)}
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-full"
+                                      title="Delete notification"
+                                    >
+                                      <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))
+                        ))
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    {notifications.length > 0 && (
+                      <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                        <button
+                          onClick={fetchNotifications}
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors flex items-center"
+                          disabled={loading}
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {notifications.length} total
+                        </span>
+                      </div>
                     )}
                   </div>
-
-                  {/* Footer */}
-                  {notifications.length > 0 && (
-                    <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                      <button
-                        onClick={fetchNotifications}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors flex items-center"
-                        disabled={loading}
-                      >
-                        <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
-                        Refresh
-                      </button>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {notifications.length} total
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          
-          {/* User Info - Desktop */}
-          <div className="hidden md:flex items-center space-x-3">
-            <div className="text-right">
-              <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{user?.name || 'Demo User'}</p>
-              <div className="flex items-center justify-end space-x-1">
-                <span className="text-xs text-gray-500 dark:text-gray-400">Role:</span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 capitalize">
-                  {user?.role || 'Admin'}
-                </span>
-              </div>
-            </div>
-
-            {/* User Avatar - Desktop */}
-            <div className="h-9 w-9 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm shadow-md overflow-hidden">
-              {user?.avatar ? (
-                <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
-              ) : (
-                <span>{user?.name?.charAt(0) || 'D'}</span>
+                </>
               )}
             </div>
-          </div>
-
-          {/* User Avatar - Mobile */}
-          <div className="md:hidden">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
-              {user?.name?.charAt(0) || 'D'}
-            </div>
-          </div>
-          
-          {/* Logout Button */}
-          <button
-            onClick={() => setShowLogoutConfirm(true)}
-            className="flex items-center space-x-1 sm:space-x-2 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200 px-2 sm:px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 border border-transparent hover:border-red-200 dark:hover:border-red-800 group"
-            title="Logout"
-          >
-            <LogOut className="h-4 w-4 sm:h-5 sm:w-5 group-hover:scale-110 transition-transform duration-200" />
-            <span className="hidden sm:inline text-sm font-medium">Logout</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Logout Confirmation Modal */}
-      {showLogoutConfirm && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 flex items-center justify-center p-4"
-            style={{ animation: 'fadeIn 0.2s ease-out' }}
-            onClick={() => setShowLogoutConfirm(false)}
-          >
-            {/* Modal */}
-            <div 
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-auto overflow-hidden"
-              style={{ animation: 'slideUp 0.3s ease-out' }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-yellow-100 dark:bg-yellow-900/30 p-2 rounded-full animate-pulse">
-                    <AlertCircle className="h-6 w-6 text-yellow-600 dark:text-yellow-500" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm Logout</h3>
+            
+            {/* User Info - Desktop */}
+            <div className="hidden md:flex items-center space-x-3">
+              <div className="text-right">
+                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{user?.name || 'Demo User'}</p>
+                <div className="flex items-center justify-end space-x-1">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Role:</span>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 capitalize">
+                    {user?.role || 'Admin'}
+                  </span>
                 </div>
-                <button
-                  onClick={() => setShowLogoutConfirm(false)}
-                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
-                >
-                  <X className="h-5 w-5" />
-                </button>
               </div>
 
-              {/* Modal Body */}
-              <div className="p-6">
-                <p className="text-gray-600 dark:text-gray-300">Are you sure you want to logout?</p>
-              </div>
-
-              {/* Modal Footer */}
-              <div className="flex items-center justify-end space-x-3 p-6 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
-                <button
-                  onClick={() => setShowLogoutConfirm(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors duration-200 flex items-center space-x-2 group"
-                >
-                  <LogOut className="h-4 w-4 group-hover:translate-x-1 transition-transform duration-200" />
-                  <span>Yes, Logout</span>
-                </button>
+              {/* User Avatar - Desktop */}
+              <div className="h-9 w-9 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm shadow-md overflow-hidden">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span>{user?.name?.charAt(0) || 'D'}</span>
+                )}
               </div>
             </div>
+
+            {/* User Avatar - Mobile */}
+            <div className="md:hidden">
+              <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
+                {user?.name?.charAt(0) || 'D'}
+              </div>
+            </div>
+            
+            {/* Logout Button */}
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              className="flex items-center space-x-1 sm:space-x-2 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200 px-2 sm:px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 border border-transparent hover:border-red-200 dark:hover:border-red-800 group"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4 sm:h-5 sm:w-5 group-hover:scale-110 transition-transform duration-200" />
+              <span className="hidden sm:inline text-sm font-medium">Logout</span>
+            </button>
           </div>
-        </>
+        </div>
+
+        {/* Logout Confirmation Modal */}
+        {showLogoutConfirm && (
+          <>
+            {/* Backdrop */}
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 flex items-center justify-center p-4"
+              style={{ animation: 'fadeIn 0.2s ease-out' }}
+              onClick={() => setShowLogoutConfirm(false)}
+            >
+              {/* Modal */}
+              <div 
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-auto overflow-hidden"
+                style={{ animation: 'slideUp 0.3s ease-out' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-yellow-100 dark:bg-yellow-900/30 p-2 rounded-full animate-pulse">
+                      <AlertCircle className="h-6 w-6 text-yellow-600 dark:text-yellow-500" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm Logout</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowLogoutConfirm(false)}
+                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-6">
+                  <p className="text-gray-600 dark:text-gray-300">Are you sure you want to logout?</p>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="flex items-center justify-end space-x-3 p-6 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={() => setShowLogoutConfirm(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors duration-200 flex items-center space-x-2 group"
+                  >
+                    <LogOut className="h-4 w-4 group-hover:translate-x-1 transition-transform duration-200" />
+                    <span>Yes, Logout</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Add animation styles in a regular style tag */}
+        <style>{`
+          @keyframes slideDown {
+            from {
+              opacity: 0;
+              transform: translateY(-10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @keyframes slideUp {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @keyframes fadeIn {
+            from {
+              opacity: 0;
+            }
+            to {
+              opacity: 1;
+            }
+          }
+
+          .animate-ping {
+            animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+          }
+
+          @keyframes ping {
+            75%, 100% {
+              transform: scale(2);
+              opacity: 0;
+            }
+          }
+
+          .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+          }
+
+          @keyframes pulse {
+            0%, 100% {
+              opacity: 1;
+            }
+            50% {
+              opacity: .5;
+            }
+          }
+
+          .animate-spin {
+            animation: spin 1s linear infinite;
+          }
+
+          @keyframes spin {
+            from {
+              transform: rotate(0deg);
+            }
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}</style>
+      </header>
+
+      {/* Approval Modal */}
+      {selectedApproval && (
+        <ApprovalModal
+          approval={selectedApproval}
+          onClose={() => setSelectedApproval(null)}
+          onApproved={handleApprovalComplete}
+        />
       )}
-
-      {/* Add animation styles in a regular style tag */}
-      <style>{`
-        @keyframes slideDown {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        .animate-ping {
-          animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
-        }
-
-        @keyframes ping {
-          75%, 100% {
-            transform: scale(2);
-            opacity: 0;
-          }
-        }
-
-        .animate-pulse {
-          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: .5;
-          }
-        }
-
-        .animate-spin {
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-      `}</style>
-    </header>
+    </>
   );
 };
 

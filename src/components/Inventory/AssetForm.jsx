@@ -1,9 +1,12 @@
 // components/Inventory/AssetForm.jsx
 import React, { useState, useEffect } from 'react';
-import { X, Save, Plus, Trash2, Package, MapPin, Tag, DollarSign, Box, Truck } from 'lucide-react';
+import { X, Save, Plus, Trash2, Package, MapPin, Tag, DollarSign, Box, Truck, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { categoryService } from '../../services/categoryService';
 import { brandService } from '../../services/brandService';
+import { approvalService } from '../../services/approvalService';
+import { useAuth } from '../../context/AuthContext';
+import { useApproval } from '../../context/ApprovalContext';
 import Loader from '../common/Loader';
 
 const AssetForm = ({ 
@@ -15,9 +18,15 @@ const AssetForm = ({
   onStockIn,
   onStockOut
 }) => {
+  const { user } = useAuth();
+  const { createApprovalRequest } = useApproval();
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [submittingForApproval, setSubmittingForApproval] = useState(false);
+  
+  // Check if user needs approval (cashier and staff need approval)
+  const needsApproval = user?.role === 'cashier' || user?.role === 'staff';
   
   // Separate state for adding stock to specific locations
   const [addStockInputs, setAddStockInputs] = useState({
@@ -77,20 +86,38 @@ const AssetForm = ({
         }
       }
 
-      // Initialize storage locations
-      let storageLocations = item.storageLocations || [];
-      if (storageLocations.length === 0) {
+      // Initialize storage locations - ensure both locations are present
+      let storageLocations = [];
+      
+      if (item.storageLocations && Array.isArray(item.storageLocations) && item.storageLocations.length > 0) {
+        // Use existing storage locations but ensure both BALAGTAS and MARILAO are present
+        const balagtasLoc = item.storageLocations.find(loc => loc.location === 'BALAGTAS');
+        const marilaoLoc = item.storageLocations.find(loc => loc.location === 'MARILAO');
+        
+        storageLocations = [
+          { 
+            location: 'BALAGTAS', 
+            quantity: balagtasLoc ? (Number(balagtasLoc.quantity) || 0) : 0,
+            reorderLevel: balagtasLoc ? (Number(balagtasLoc.reorderLevel) || 10) : 10
+          },
+          { 
+            location: 'MARILAO', 
+            quantity: marilaoLoc ? (Number(marilaoLoc.quantity) || 0) : 0,
+            reorderLevel: marilaoLoc ? (Number(marilaoLoc.reorderLevel) || 10) : 10
+          }
+        ];
+      } else {
         // If no storage locations, create from legacy fields
         storageLocations = [
           { 
             location: 'BALAGTAS', 
-            quantity: item.storageLocation === 'BALAGTAS' ? (item.quantity || 0) : 0,
-            reorderLevel: item.reorderLevel || 10
+            quantity: item.storageLocation === 'BALAGTAS' ? (Number(item.quantity) || 0) : 0,
+            reorderLevel: Number(item.reorderLevel) || 10
           },
           { 
             location: 'MARILAO', 
-            quantity: item.storageLocation === 'MARILAO' ? (item.quantity || 0) : 0,
-            reorderLevel: item.reorderLevel || 10
+            quantity: item.storageLocation === 'MARILAO' ? (Number(item.quantity) || 0) : 0,
+            reorderLevel: Number(item.reorderLevel) || 10
           }
         ];
       }
@@ -108,6 +135,12 @@ const AssetForm = ({
         description: item.description || '',
         unit: item.unit || 'pcs',
         source: item.source || 'Office Inventory'
+      });
+
+      // Initialize add stock inputs to 0 for both locations
+      setAddStockInputs({
+        BALAGTAS: 0,
+        MARILAO: 0
       });
     }
   }, [item, mode]);
@@ -150,6 +183,15 @@ const AssetForm = ({
     }));
   };
 
+  const handleLocationQuantityChange = (location, value) => {
+    setFormData(prev => ({
+      ...prev,
+      storageLocations: prev.storageLocations.map(loc => 
+        loc.location === location ? { ...loc, quantity: parseFloat(value) || 0 } : loc
+      )
+    }));
+  };
+
   const handleLocationReorderChange = (location, value) => {
     setFormData(prev => ({
       ...prev,
@@ -159,19 +201,80 @@ const AssetForm = ({
     }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
+  const submitForApproval = async () => {
+    if (!validateForm()) return;
+
+    setSubmittingForApproval(true);
+    try {
+      // Update quantities with add stock inputs
+      const updatedStorageLocations = formData.storageLocations.map(loc => ({
+        ...loc,
+        quantity: Number(loc.quantity) + (Number(addStockInputs[loc.location]) || 0)
+      }));
+
+      // Prepare data for approval
+      const approvalData = {
+        requestType: mode,
+        data: {
+          ...formData,
+          storageLocations: updatedStorageLocations,
+          costPrice: Number(formData.costPrice) || 0,
+          sellingPrice: Number(formData.sellingPrice) || 0,
+        },
+        originalData: mode === 'edit' ? item : null,
+        itemId: mode === 'edit' ? (item?._id || item?.id) : null,
+        notes: `Request to ${mode} item: ${formData.name}`
+      };
+
+      // Add optional fields if they exist
+      if (formData.productCode?.trim()) {
+        approvalData.data.productCode = formData.productCode.trim();
+      }
+      
+      if (formData.barcode?.trim()) {
+        approvalData.data.barcode = formData.barcode.trim();
+      }
+      
+      if (formData.description?.trim()) {
+        approvalData.data.description = formData.description.trim();
+      }
+
+      await createApprovalRequest(approvalData);
+      
+      toast.success(`Your request has been submitted for approval. ${mode === 'create' ? 'Item will be created' : 'Changes will be applied'} after approval.`);
+      onClose();
+    } catch (error) {
+      console.error('Approval submission error:', error);
+      toast.error(error.message || 'Failed to submit for approval');
+    } finally {
+      setSubmittingForApproval(false);
+    }
+  };
+
+  const validateForm = () => {
     if (!formData.name?.trim()) {
       toast.error('Item name is required');
-      return;
+      return false;
     }
     if (!formData.brand) {
       toast.error('Please select a brand');
-      return;
+      return false;
     }
     if (!formData.category) {
       toast.error('Please select a category');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+
+    // If user needs approval (cashier/staff), submit for approval instead
+    if (needsApproval) {
+      await submitForApproval();
       return;
     }
 
@@ -245,22 +348,53 @@ const AssetForm = ({
 
   const handleDelete = () => {
     if (window.confirm(`Are you sure you want to delete ${item ? item.name : 'this item'}?`)) {
-      onDelete(item);
+      if (needsApproval) {
+        // Submit delete for approval
+        submitDeleteForApproval();
+      } else {
+        onDelete(item);
+      }
+    }
+  };
+
+  const submitDeleteForApproval = async () => {
+    setSubmittingForApproval(true);
+    try {
+      const approvalData = {
+        requestType: 'delete',
+        data: item,
+        itemId: item._id || item.id,
+        notes: `Request to delete item: ${item.name}`
+      };
+
+      await createApprovalRequest(approvalData);
+      toast.success('Delete request submitted for approval');
+      onClose();
+    } catch (error) {
+      console.error('Delete approval error:', error);
+      toast.error('Failed to submit delete request');
+    } finally {
+      setSubmittingForApproval(false);
     }
   };
 
   const getTitle = () => {
     switch(mode) {
-      case 'create': return 'Add New Item';
-      case 'edit': return 'Edit Item';
+      case 'create': return needsApproval ? 'Request New Item' : 'Add New Item';
+      case 'edit': return needsApproval ? 'Request Edit Item' : 'Edit Item';
       default: return 'Asset Form';
     }
   };
 
   const getTotalQuantity = () => {
-    const baseTotal = formData.storageLocations.reduce((sum, loc) => sum + (loc.quantity || 0), 0);
+    const baseTotal = formData.storageLocations.reduce((sum, loc) => sum + (Number(loc.quantity) || 0), 0);
     const addTotal = Object.values(addStockInputs).reduce((sum, val) => sum + (Number(val) || 0), 0);
     return baseTotal + addTotal;
+  };
+
+  const getLocationQuantity = (location) => {
+    const loc = formData.storageLocations.find(l => l.location === location);
+    return loc ? Number(loc.quantity) || 0 : 0;
   };
 
   return (
@@ -269,6 +403,12 @@ const AssetForm = ({
         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{getTitle()}</h2>
+            {needsApproval && (
+              <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-1 flex items-center gap-1">
+                <Send className="h-3 w-3" />
+                This will be submitted for approval
+              </p>
+            )}
             {item && mode === 'edit' && (
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 Total Stock: {getTotalQuantity()}
@@ -426,49 +566,113 @@ const AssetForm = ({
               Inventory by Location
             </h3>
 
-            {formData.storageLocations.map((loc) => (
-              <div key={loc.location} className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {loc.location} Warehouse
-                  </label>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Current Quantity
-                    </label>
-                    <div className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white">
-                      {loc.quantity || 0}
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Add Stock
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={addStockInputs[loc.location] || 0}
-                      onChange={(e) => handleAddStockChange(loc.location, e.target.value)}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                      placeholder="0"
-                    />
-                  </div>
-
-                 
-                </div>
-                
-                {addStockInputs[loc.location] > 0 && (
-                  <p className="text-xs text-green-600 dark:text-green-400 mt-2">
-                    New total will be: {loc.quantity + (Number(addStockInputs[loc.location]) || 0)}
-                  </p>
-                )}
+            {/* BALAGTAS Location */}
+            <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border-l-4 border-blue-500">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-blue-500" />
+                    BALAGTAS Warehouse
+                  </span>
+                </label>
+                <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded">
+                  Current: {getLocationQuantity('BALAGTAS')}
+                </span>
               </div>
-            ))}
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Current Quantity
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.storageLocations.find(l => l.location === 'BALAGTAS')?.quantity || 0}
+                    onChange={(e) => handleLocationQuantityChange('BALAGTAS', e.target.value)}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Add Stock
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={addStockInputs.BALAGTAS || 0}
+                    onChange={(e) => handleAddStockChange('BALAGTAS', e.target.value)}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    placeholder="0"
+                  />
+                </div>
+
+                
+              </div>
+              
+              {addStockInputs.BALAGTAS > 0 && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                  New total will be: {(Number(formData.storageLocations.find(l => l.location === 'BALAGTAS')?.quantity) || 0) + (Number(addStockInputs.BALAGTAS) || 0)}
+                </p>
+              )}
+            </div>
+
+            {/* MARILAO Location */}
+            <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border-l-4 border-green-500">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-green-500" />
+                    MARILAO Warehouse
+                  </span>
+                </label>
+                <span className="text-xs bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 px-2 py-1 rounded">
+                  Current: {getLocationQuantity('MARILAO')}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Current Quantity
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.storageLocations.find(l => l.location === 'MARILAO')?.quantity || 0}
+                    onChange={(e) => handleLocationQuantityChange('MARILAO', e.target.value)}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Add Stock
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={addStockInputs.MARILAO || 0}
+                    onChange={(e) => handleAddStockChange('MARILAO', e.target.value)}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    placeholder="0"
+                  />
+                </div>
+
+              
+              </div>
+              
+              {addStockInputs.MARILAO > 0 && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                  New total will be: {(Number(formData.storageLocations.find(l => l.location === 'MARILAO')?.quantity) || 0) + (Number(addStockInputs.MARILAO) || 0)}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -552,27 +756,30 @@ const AssetForm = ({
               <button
                 type="button"
                 onClick={handleDelete}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium flex items-center"
+                disabled={submittingForApproval}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 className="h-4 w-4 mr-2" />
-                Delete
+                {needsApproval ? 'Request Delete' : 'Delete'}
               </button>
             )}
             
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || submittingForApproval}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? (
+              {loading || submittingForApproval ? (
                 <>
                   <Loader size="small" color="white" />
                   <span className="ml-2">Processing...</span>
                 </>
               ) : (
                 <>
-                  <Save className="h-4 w-4 mr-2" />
-                  {mode === 'create' ? 'Add Item' : 'Update Item'}
+                  {needsApproval ? <Send className="h-4 w-4 mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                  {needsApproval 
+                    ? (mode === 'create' ? 'Request Add' : 'Request Update')
+                    : (mode === 'create' ? 'Add Item' : 'Update Item')}
                 </>
               )}
             </button>
