@@ -231,13 +231,7 @@ const ShipmentList = () => {
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Shipments</h2>
-          <button
-            onClick={() => navigate('/shipments/new')}
-            className="mt-2 sm:mt-0 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 text-sm"
-          >
-            <Package className="h-4 w-4 mr-2" />
-            Create Shipment
-          </button>
+          
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
