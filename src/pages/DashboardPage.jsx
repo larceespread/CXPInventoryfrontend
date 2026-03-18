@@ -7,7 +7,7 @@ import TotalAssets from '../components/Dashboard/TotalAssets'
 import AvailableAsset from '../components/Inventory/AvailableAsset'
 import ShipmentForm from '../components/shipments/ShipmentForm.jsx'
 import ShipmentList from '../components/shipments/ShipmentList.jsx'
-import PendingReturns from './PendingReturns.jsx'
+import PendingReturns from '../components/shipments/PendingReturns.jsx'
 import Loader from '../components/common/Loader'
 import toast from 'react-hot-toast'
 import { useAuth } from '../context/AuthContext'
@@ -405,7 +405,6 @@ const DashboardPage = () => {
   const handleShipmentSuccess = () => {
     setShowShipmentForm(false)
     loadDashboardData()
-    toast.success('Shipment created successfully')
   }
 
   const handleAddNewItem = async (formData) => {
@@ -428,7 +427,6 @@ const DashboardPage = () => {
       }
       
       await productService.updateProduct(itemId, formData)
-      toast.success('Item updated successfully')
       loadDashboardData()
     } catch (error) {
       console.error('Update error:', error)

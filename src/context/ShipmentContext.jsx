@@ -1,4 +1,4 @@
-// context/ShipmentContext.jsx - COMPLETE FIXED VERSION
+// context/ShipmentContext.jsx - COMPLETE UPDATED VERSION
 
 import React, { createContext, useState, useContext, useCallback } from 'react';
 import { shipmentService } from '../services/shipmentService';
@@ -79,7 +79,6 @@ export const ShipmentProvider = ({ children }) => {
             
             const response = await productService.getProducts(params);
             
-            // Handle different response structures
             let productsArray = [];
             if (Array.isArray(response)) {
                 productsArray = response;
@@ -110,7 +109,6 @@ export const ShipmentProvider = ({ children }) => {
             const response = await shipmentService.getShipments(params);
             console.log('Shipments response:', response);
             
-            // Handle different response structures
             let shipmentsArray = [];
             let count = 0;
             
@@ -151,7 +149,6 @@ export const ShipmentProvider = ({ children }) => {
                 throw new Error('Shipment ID is required');
             }
 
-            // Validate ID format
             if (id === 'undefined' || id === 'null' || id === '') {
                 throw new Error('Invalid shipment ID format');
             }
@@ -159,7 +156,6 @@ export const ShipmentProvider = ({ children }) => {
             const response = await shipmentService.getShipmentById(id);
             console.log('Shipment by ID response:', response);
             
-            // Handle 404 or error responses
             if (response?.success === false) {
                 if (response.error === 'Shipment not found') {
                     setCurrentShipment(null);
@@ -169,24 +165,19 @@ export const ShipmentProvider = ({ children }) => {
                 throw new Error(response.error || 'Failed to fetch shipment');
             }
             
-            // Handle different response structures
             let shipmentData = null;
             
             if (response?.data) {
-                // Standard API response { success: true, data: shipment }
                 shipmentData = response.data;
             } else if (response?._id || response?.id) {
-                // Direct shipment object
                 shipmentData = response;
             } else if (response?.success && response?.data) {
-                // Another common pattern
                 shipmentData = response.data;
             }
             
             if (!shipmentData) {
                 console.error('Could not extract shipment data from response:', response);
                 
-                // If we got a 404, set to null and return
                 if (response?.error === 'Shipment not found' || response?.status === 404) {
                     setCurrentShipment(null);
                     return null;
@@ -195,12 +186,26 @@ export const ShipmentProvider = ({ children }) => {
                 throw new Error('Invalid shipment data received from server');
             }
             
-            // Ensure items have proper returnable field format
+            // Ensure items have proper fields including the new ones for sold/processed items
             if (shipmentData.items && Array.isArray(shipmentData.items)) {
                 shipmentData.items = shipmentData.items.map(item => ({
                     ...item,
                     toBeReturned: formatReturnable(item.toBeReturned),
-                    returnedQuantity: item.returnedQuantity || 0
+                    returnedQuantity: item.returnedQuantity || 0,
+                    soldQuantity: item.soldQuantity || 0,
+                    givenAwayQuantity: item.givenAwayQuantity || 0,
+                    permanentlyDeletedQuantity: item.permanentlyDeletedQuantity || 0,
+                    totalProcessed: (item.returnedQuantity || 0) + 
+                                   (item.soldQuantity || 0) + 
+                                   (item.givenAwayQuantity || 0) + 
+                                   (item.permanentlyDeletedQuantity || 0),
+                    pendingQuantity: item.quantity - (
+                        (item.returnedQuantity || 0) + 
+                        (item.soldQuantity || 0) + 
+                        (item.givenAwayQuantity || 0) + 
+                        (item.permanentlyDeletedQuantity || 0)
+                    ),
+                    isProcessed: item.isProcessed || false
                 }));
             }
             
@@ -211,12 +216,10 @@ export const ShipmentProvider = ({ children }) => {
             console.error('Error fetching shipment:', error);
             setError(error.message || 'Failed to fetch shipment');
             
-            // Don't show toast for 404 errors as they're handled by the component
             if (error.message !== 'Shipment not found' && !error.message.includes('404')) {
                 toast.error(error.message || 'Failed to load shipment details');
             }
             
-            // Set currentShipment to null on error
             setCurrentShipment(null);
             throw error;
         } finally {
@@ -244,7 +247,6 @@ export const ShipmentProvider = ({ children }) => {
         try {
             console.log('Creating shipment with data:', shipmentData);
             
-            // Format items to ensure proper returnable field
             const formattedItems = (shipmentData.items || []).map(item => ({
                 ...item,
                 toBeReturned: formatReturnable(item.toBeReturned || item.returnable)
@@ -255,9 +257,7 @@ export const ShipmentProvider = ({ children }) => {
                 items: formattedItems
             };
             
-            // Only validate stock for outgoing shipments
             if (shipmentData.type === 'OUTGOING' && formattedItems.length > 0) {
-                // Format items for validation - backend expects array of objects with product, quantity, location
                 const validationItems = formattedItems.map(item => ({
                     product: item.productId || item.product,
                     quantity: Number(item.quantity),
@@ -270,7 +270,6 @@ export const ShipmentProvider = ({ children }) => {
                     const validation = await shipmentService.validateStock({ items: validationItems });
                     console.log('Validation response:', validation);
                     
-                    // Check if validation failed
                     if (validation?.data?.allAvailable === false) {
                         const unavailableItems = validation?.data?.results
                             ?.filter(r => !r.available)
@@ -280,9 +279,7 @@ export const ShipmentProvider = ({ children }) => {
                         throw new Error(`Insufficient stock for: ${unavailableItems || 'some items'}`);
                     }
                 } catch (validationError) {
-                    // If validation endpoint fails, log but continue (don't block creation)
                     console.warn('Stock validation skipped:', validationError);
-                    // Don't throw here - allow creation anyway
                 }
             }
 
@@ -294,7 +291,6 @@ export const ShipmentProvider = ({ children }) => {
             return response;
         } catch (error) {
             console.error('Error creating shipment:', error);
-            // Extract error message properly
             const errorMessage = error.response?.data?.message || 
                                 error.message || 
                                 'Failed to create shipment';
@@ -310,7 +306,6 @@ export const ShipmentProvider = ({ children }) => {
         try {
             console.log('Updating shipment:', id, shipmentData);
             
-            // Format items to ensure proper returnable field
             const formattedItems = (shipmentData.items || []).map(item => ({
                 ...item,
                 toBeReturned: formatReturnable(item.toBeReturned || item.returnable)
@@ -384,41 +379,181 @@ export const ShipmentProvider = ({ children }) => {
         }
     }, [fetchShipments, currentShipment]);
 
-    // Return items - FIXED VERSION
+    // Return items - ISANG BESES LANG!
     const returnItems = useCallback(async (id, returnData) => {
         setLoading(true);
         try {
-            console.log('Returning items with data:', returnData);
+            console.log('Processing items with data:', returnData);
             
-            // Ensure the return data has the correct structure
-            // The shipmentService.returnItems function has been fixed to expect 'index'
             const response = await shipmentService.returnItems(id, returnData);
             console.log('Return items response:', response);
             
             if (response?.success) {
-                // Update current shipment if it's the one being viewed
                 if (currentShipment && (currentShipment._id === id || currentShipment.id === id)) {
                     await fetchShipmentById(id);
                 }
                 
-                // Refresh shipments list
                 await fetchShipments();
                 
-                toast.success('Items returned successfully');
+                const actionType = returnData.items?.[0]?.action || 'returned';
+                let actionMessage = '';
+                
+                if (actionType === 'return') {
+                    actionMessage = 'Items returned successfully';
+                } else {
+                    actionMessage = 'Items processed successfully';
+                }
+                
+                toast.success(actionMessage);
             }
             
             return response;
         } catch (error) {
-            console.error('Error returning items:', error);
+            console.error('Error processing items:', error);
             const errorMessage = error.response?.data?.message || 
                                 error.message || 
-                                'Failed to return items';
+                                'Failed to process items';
             toast.error(errorMessage);
             throw error;
         } finally {
             setLoading(false);
         }
     }, [fetchShipmentById, fetchShipments, currentShipment]);
+
+    // Mark remaining items as sold automatically
+    const markRemainingAsSold = useCallback(async (id) => {
+        setLoading(true);
+        try {
+            console.log('Marking remaining items as sold for shipment:', id);
+            
+            const response = await shipmentService.markRemainingAsSold(id);
+            console.log('Mark sold response:', response);
+            
+            if (response?.success) {
+                if (currentShipment && (currentShipment._id === id || currentShipment.id === id)) {
+                    await fetchShipmentById(id);
+                }
+                
+                await fetchShipments();
+                
+                toast.success('Remaining items marked as sold successfully');
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('Error marking items as sold:', error);
+            const errorMessage = error.response?.data?.message || 
+                                error.message || 
+                                'Failed to mark items as sold';
+            toast.error(errorMessage);
+            throw error;
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchShipmentById, fetchShipments, currentShipment]);
+
+    // Mark specific pending items as sold
+    const markItemsAsSold = useCallback(async (id, itemsData) => {
+        setLoading(true);
+        try {
+            console.log('Marking specific items as sold for shipment:', id, itemsData);
+            
+            const response = await shipmentService.markItemsAsSold(id, itemsData);
+            console.log('Mark items sold response:', response);
+            
+            if (response?.success) {
+                if (currentShipment && (currentShipment._id === id || currentShipment.id === id)) {
+                    await fetchShipmentById(id);
+                }
+                
+                await fetchShipments();
+                
+                toast.success('Selected items marked as sold successfully');
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('Error marking items as sold:', error);
+            const errorMessage = error.response?.data?.message || 
+                                error.message || 
+                                'Failed to mark items as sold';
+            toast.error(errorMessage);
+            throw error;
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchShipmentById, fetchShipments, currentShipment]);
+
+    // Get available items for return (unsold, unprocessed items only)
+    const getAvailableForReturn = useCallback(async (id) => {
+        try {
+            const response = await shipmentService.getAvailableForReturn(id);
+            return response;
+        } catch (error) {
+            console.error('Error getting available returns:', error);
+            return { success: true, data: [] };
+        }
+    }, []);
+
+    // Get item return history
+    const getItemReturnHistory = useCallback(async (shipmentId, itemIndex) => {
+        try {
+            const response = await shipmentService.getItemReturnHistory(shipmentId, itemIndex);
+            return response;
+        } catch (error) {
+            console.error('Error getting item return history:', error);
+            return { success: true, data: { item: null, returnHistory: [] } };
+        }
+    }, []);
+
+    // Permanently delete items from inventory
+    const permanentlyDeleteItems = useCallback(async (id, deleteData) => {
+        setLoading(true);
+        try {
+            console.log('Permanently deleting items with data:', deleteData);
+            
+            const response = await shipmentService.permanentlyDeleteItems(id, deleteData);
+            console.log('Permanent delete response:', response);
+            
+            if (response?.success) {
+                if (currentShipment && (currentShipment._id === id || currentShipment.id === id)) {
+                    await fetchShipmentById(id);
+                }
+                
+                await fetchShipments();
+                
+                toast.success('Items permanently deleted from inventory');
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('Error permanently deleting items:', error);
+            const errorMessage = error.response?.data?.message || 
+                                error.message || 
+                                'Failed to permanently delete items';
+            toast.error(errorMessage);
+            throw error;
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchShipmentById, fetchShipments, currentShipment]);
+
+    // Check if shipment has processed items
+    const checkProcessedItems = useCallback(async (id) => {
+        try {
+            const response = await shipmentService.hasProcessedItems(id);
+            return response.data;
+        } catch (error) {
+            console.error('Error checking processed items:', error);
+            return {
+                hasProcessed: false,
+                hasReturns: false,
+                hasSold: false,
+                hasBeenProcessed: false,
+                canProcess: true
+            };
+        }
+    }, []);
 
     const fetchShipmentStats = useCallback(async () => {
         try {
@@ -434,7 +569,6 @@ export const ShipmentProvider = ({ children }) => {
     const addItem = useCallback(async (shipmentId, itemData) => {
         setLoading(true);
         try {
-            // Format returnable field
             const formattedItem = {
                 ...itemData,
                 toBeReturned: formatReturnable(itemData.toBeReturned || itemData.returnable)
@@ -460,7 +594,6 @@ export const ShipmentProvider = ({ children }) => {
     const updateItem = useCallback(async (shipmentId, itemId, itemData) => {
         setLoading(true);
         try {
-            // Format returnable field
             const formattedItem = {
                 ...itemData,
                 toBeReturned: formatReturnable(itemData.toBeReturned || itemData.returnable)
@@ -503,27 +636,134 @@ export const ShipmentProvider = ({ children }) => {
         }
     }, [currentShipment, fetchShipmentById]);
 
-    // Get return summary for a shipment
-    const getReturnSummary = useCallback((shipment) => {
+    // Get processing summary for a shipment
+    const getProcessingSummary = useCallback((shipment) => {
         if (!shipment || !shipment.items) {
-            return { totalToBeReturned: 0, totalReturned: 0, pending: 0, percentage: 0 };
+            return { 
+                totalItems: 0,
+                totalReturned: 0, 
+                totalSold: 0, 
+                totalGivenAway: 0, 
+                totalDeleted: 0,
+                totalProcessed: 0,
+                pending: 0, 
+                percentage: 0,
+                hasBeenProcessed: false
+            };
         }
         
-        const totalToBeReturned = shipment.items
-            .filter(item => item.toBeReturned)
-            .reduce((sum, item) => sum + (item.quantity || 0), 0);
+        const totalItems = shipment.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
         
-        const totalReturned = shipment.returnedItems
-            ?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+        const totalReturned = shipment.items.reduce((sum, item) => sum + (item.returnedQuantity || 0), 0);
+        const totalSold = shipment.items.reduce((sum, item) => sum + (item.soldQuantity || 0), 0);
+        const totalGivenAway = shipment.items.reduce((sum, item) => sum + (item.givenAwayQuantity || 0), 0);
+        const totalDeleted = shipment.items.reduce((sum, item) => sum + (item.permanentlyDeletedQuantity || 0), 0);
         
-        const pending = totalToBeReturned - totalReturned;
-        const percentage = totalToBeReturned > 0 ? (totalReturned / totalToBeReturned) * 100 : 0;
+        const totalProcessed = totalReturned + totalSold + totalGivenAway + totalDeleted;
+        const pending = totalItems - totalProcessed;
+        const percentage = totalItems > 0 ? (totalProcessed / totalItems) * 100 : 0;
         
         return {
-            totalToBeReturned,
+            totalItems,
             totalReturned,
+            totalSold,
+            totalGivenAway,
+            totalDeleted,
+            totalProcessed,
             pending,
-            percentage
+            percentage,
+            hasBeenProcessed: shipment.hasBeenProcessed || false
+        };
+    }, []);
+
+    // Get return summary for a shipment
+    const getReturnSummary = useCallback((shipment) => {
+        const summary = getProcessingSummary(shipment);
+        return {
+            totalToBeReturned: summary.totalItems,
+            totalReturned: summary.totalReturned,
+            pending: summary.pending,
+            percentage: summary.percentage,
+            hasBeenProcessed: summary.hasBeenProcessed
+        };
+    }, [getProcessingSummary]);
+
+    // Get pending items that need processing
+    const getPendingItems = useCallback((shipment) => {
+        if (!shipment || !shipment.items) return [];
+        
+        return shipment.items
+            .map((item, index) => {
+                const processedQty = (item.returnedQuantity || 0) + 
+                                    (item.soldQuantity || 0) + 
+                                    (item.givenAwayQuantity || 0) + 
+                                    (item.permanentlyDeletedQuantity || 0);
+                const pendingQuantity = item.quantity - processedQty;
+                
+                return {
+                    ...item,
+                    index,
+                    pendingQuantity,
+                    processedQty,
+                    isProcessed: item.isProcessed || false
+                };
+            })
+            .filter(item => item.pendingQuantity > 0 && !item.isProcessed);
+    }, []);
+
+    // Get sold items summary
+    const getSoldItemsSummary = useCallback((shipment) => {
+        if (!shipment || !shipment.items) {
+            return {
+                totalSold: 0,
+                soldItems: [],
+                totalSoldValue: 0
+            };
+        }
+        
+        const soldItems = shipment.items.filter(item => (item.soldQuantity || 0) > 0);
+        const totalSold = soldItems.reduce((sum, item) => sum + (item.soldQuantity || 0), 0);
+        const totalSoldValue = soldItems.reduce((sum, item) => {
+            return sum + ((item.soldQuantity || 0) * (item.productSnapshot?.price || 0));
+        }, 0);
+        
+        return {
+            totalSold,
+            soldItems,
+            totalSoldValue
+        };
+    }, []);
+
+    // Get returnable items summary (unsold, unprocessed items)
+    const getReturnableItemsSummary = useCallback((shipment) => {
+        if (!shipment || !shipment.items) {
+            return {
+                totalReturnable: 0,
+                returnableItems: [],
+                totalPending: 0
+            };
+        }
+        
+        const returnableItems = shipment.items.filter(item => {
+            const processedQty = (item.returnedQuantity || 0) + 
+                                (item.soldQuantity || 0) + 
+                                (item.givenAwayQuantity || 0) + 
+                                (item.permanentlyDeletedQuantity || 0);
+            return processedQty < item.quantity && !item.isProcessed;
+        });
+        
+        const totalPending = returnableItems.reduce((sum, item) => {
+            const processedQty = (item.returnedQuantity || 0) + 
+                                (item.soldQuantity || 0) + 
+                                (item.givenAwayQuantity || 0) + 
+                                (item.permanentlyDeletedQuantity || 0);
+            return sum + (item.quantity - processedQty);
+        }, 0);
+        
+        return {
+            totalReturnable: returnableItems.length,
+            returnableItems,
+            totalPending
         };
     }, []);
 
@@ -553,10 +793,20 @@ export const ShipmentProvider = ({ children }) => {
         deleteShipment,
         updateStatus: updateShipmentStatus,
         returnItems,
+        markRemainingAsSold,
+        markItemsAsSold,
+        getAvailableForReturn,
+        getItemReturnHistory,
+        permanentlyDeleteItems,
+        checkProcessedItems,
         addItem,
         updateItem,
         removeItem,
         getReturnSummary,
+        getProcessingSummary,
+        getPendingItems,
+        getSoldItemsSummary,
+        getReturnableItemsSummary,
         getProductName,
         getProductId,
         getStockAtLocation,

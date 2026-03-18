@@ -19,6 +19,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { useTheme } from '../context/ThemeContext';
 
+const CACHE_KEYS = {
+  USERS: 'users_cache',
+  STATS: 'user_stats_cache',
+  TIMESTAMP: 'users_cache_timestamp'
+};
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 const Users = () => {
   const { isDarkMode } = useTheme();
   const [users, setUsers] = useState([]);
@@ -51,9 +59,9 @@ const Users = () => {
     cashiers: 0
   });
 
+  // Load cached data on initial mount
   useEffect(() => {
-    fetchUsers();
-    fetchUserStats();
+    loadCachedData();
     
     const interval = setInterval(() => {
       fetchUsers(true);
@@ -67,6 +75,67 @@ const Users = () => {
       fetchUserActivities(selectedUser._id);
     }
   }, [selectedUser]);
+
+  // Load data from localStorage
+  const loadCachedData = () => {
+    try {
+      const timestamp = localStorage.getItem(CACHE_KEYS.TIMESTAMP);
+      const now = Date.now();
+
+      // Check if cache is still valid
+      if (timestamp && (now - parseInt(timestamp)) < CACHE_DURATION) {
+        const cachedUsers = localStorage.getItem(CACHE_KEYS.USERS);
+        const cachedStats = localStorage.getItem(CACHE_KEYS.STATS);
+        const cachedPagination = localStorage.getItem('users_pagination_cache');
+
+        if (cachedUsers) {
+          setUsers(JSON.parse(cachedUsers));
+        }
+        
+        if (cachedStats) {
+          setStats(JSON.parse(cachedStats));
+        }
+
+        if (cachedPagination) {
+          setPagination(JSON.parse(cachedPagination));
+        }
+
+        setLoading(false);
+      } else {
+        // Cache expired or doesn't exist, fetch fresh data
+        fetchUsers();
+        fetchUserStats();
+      }
+    } catch (err) {
+      console.error('Error loading cached data:', err);
+      fetchUsers();
+      fetchUserStats();
+    }
+  };
+
+  // Save data to localStorage
+  const saveToCache = (usersData, statsData, paginationData) => {
+    try {
+      localStorage.setItem(CACHE_KEYS.USERS, JSON.stringify(usersData));
+      localStorage.setItem(CACHE_KEYS.STATS, JSON.stringify(statsData));
+      localStorage.setItem('users_pagination_cache', JSON.stringify(paginationData));
+      localStorage.setItem(CACHE_KEYS.TIMESTAMP, Date.now().toString());
+    } catch (err) {
+      console.error('Error saving to cache:', err);
+    }
+  };
+
+  // Clear cache
+  const clearCache = () => {
+    try {
+      localStorage.removeItem(CACHE_KEYS.USERS);
+      localStorage.removeItem(CACHE_KEYS.STATS);
+      localStorage.removeItem('users_pagination_cache');
+      localStorage.removeItem(CACHE_KEYS.TIMESTAMP);
+    } catch (err) {
+      console.error('Error clearing cache:', err);
+    }
+  };
 
   const fetchUsers = async (silent = false) => {
     try {
@@ -82,14 +151,20 @@ const Users = () => {
       if (response.success) {
         const formattedUsers = response.data.map(user => userService.formatUser(user));
         setUsers(formattedUsers);
-        calculateStats(formattedUsers);
         
-        setPagination({
+        const newStats = calculateStats(formattedUsers);
+        
+        const newPagination = {
           page: response.pagination?.page || 1,
           limit: response.pagination?.limit || 25,
           total: response.total || 0,
           totalPages: Math.ceil((response.total || 0) / (response.pagination?.limit || 25))
-        });
+        };
+        
+        setPagination(newPagination);
+        
+        // Save to cache
+        saveToCache(formattedUsers, newStats, newPagination);
       } else {
         setUsers([]);
       }
@@ -106,10 +181,17 @@ const Users = () => {
     try {
       const response = await userService.getUserStats();
       if (response.success) {
-        setStats(prev => ({
-          ...prev,
+        const newStats = {
+          ...stats,
           ...response.data
-        }));
+        };
+        setStats(newStats);
+        
+        // Update stats in cache
+        const cachedUsers = localStorage.getItem(CACHE_KEYS.USERS);
+        if (cachedUsers) {
+          saveToCache(JSON.parse(cachedUsers), newStats, pagination);
+        }
       }
     } catch (err) {
       console.error('Error fetching user stats:', err);
@@ -120,7 +202,7 @@ const Users = () => {
     const now = new Date();
     const fiveMinutesAgo = new Date(now.getTime() - 5 * 60000);
 
-    const stats = {
+    const newStats = {
       totalUsers: usersList.length,
       activeNow: usersList.filter(u => 
         u.lastActive && new Date(u.lastActive) > fiveMinutesAgo
@@ -130,7 +212,8 @@ const Users = () => {
       staff: usersList.filter(u => u.role === 'staff').length,
       cashiers: usersList.filter(u => u.role === 'cashier').length
     };
-    setStats(stats);
+    setStats(newStats);
+    return newStats;
   };
 
   const fetchUserActivities = async (userId) => {
@@ -193,6 +276,7 @@ const Users = () => {
 
     try {
       await userService.deleteUser(userId);
+      clearCache(); // Clear cache on data modification
       fetchUsers();
       fetchUserStats();
     } catch (err) {
@@ -204,6 +288,7 @@ const Users = () => {
   const handleToggleUserStatus = async (userId, currentStatus) => {
     try {
       await userService.toggleUserStatus(userId, !currentStatus);
+      clearCache(); // Clear cache on data modification
       fetchUsers();
       fetchUserStats();
     } catch (err) {
@@ -215,6 +300,7 @@ const Users = () => {
   const handleUserSaved = () => {
     setShowUserModal(false);
     setSelectedUser(null);
+    clearCache(); // Clear cache on data modification
     fetchUsers();
     fetchUserStats();
   };
@@ -222,6 +308,12 @@ const Users = () => {
   const handlePasswordChanged = () => {
     setShowPasswordModal(false);
     setSelectedUser(null);
+  };
+
+  const handleManualRefresh = () => {
+    clearCache();
+    fetchUsers();
+    fetchUserStats();
   };
 
   const formatLastActive = (lastActive) => {
@@ -357,7 +449,7 @@ const Users = () => {
                 Filters
               </button>
               <button
-                onClick={() => fetchUsers()}
+                onClick={handleManualRefresh}
                 className={`inline-flex items-center px-3 py-2 border ${isDarkMode ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'} shadow-sm text-sm font-medium rounded-md bg-white dark:bg-gray-800 transition-colors duration-200`}
               >
                 <ArrowPathIcon className="h-4 w-4 mr-2" />
@@ -438,12 +530,19 @@ const Users = () => {
             </div>
           )}
 
-          {/* Pagination Info */}
+          {/* Cache Info and Pagination Info */}
           {!loading && users.length > 0 && (
-            <div className={`mt-4 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Showing {((pagination.page - 1) * pagination.limit) + 1} to{' '}
-              {Math.min(pagination.page * pagination.limit, pagination.total)} of{' '}
-              {pagination.total} users
+            <div className="mt-4 flex justify-between items-center">
+              <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                Showing {((pagination.page - 1) * pagination.limit) + 1} to{' '}
+                {Math.min(pagination.page * pagination.limit, pagination.total)} of{' '}
+                {pagination.total} users
+              </div>
+              <div className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                {localStorage.getItem(CACHE_KEYS.TIMESTAMP) && (
+                  <>Last updated: {format(new Date(parseInt(localStorage.getItem(CACHE_KEYS.TIMESTAMP))), 'h:mm:ss a')}</>
+                )}
+              </div>
             </div>
           )}
         </div>

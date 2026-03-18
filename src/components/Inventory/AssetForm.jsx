@@ -329,7 +329,6 @@ const AssetForm = ({
       
       await onSubmit(submitData);
       
-      toast.success(mode === 'create' ? 'Item created successfully' : 'Item updated successfully');
       onClose();
     } catch (error) {
       console.error('❌ Form submission error:', error);
@@ -650,50 +649,7 @@ const AssetForm = ({
             </div>
           </div>
 
-          <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-md font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Pricing
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Cost Price
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-gray-500 dark:text-gray-400">₱</span>
-                  <input
-                    type="number"
-                    name="costPrice"
-                    value={formData.costPrice || 0}
-                    onChange={handleChange}
-                    min="0"
-                    step="0.01"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 pl-8 pr-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Selling Price
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-gray-500 dark:text-gray-400">₱</span>
-                  <input
-                    type="number"
-                    name="sellingPrice"
-                    value={formData.sellingPrice || 0}
-                    onChange={handleChange}
-                    min="0"
-                    step="0.01"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 pl-8 pr-3 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+       
 
           <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-md font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">

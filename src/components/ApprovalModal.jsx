@@ -29,7 +29,6 @@ const ApprovalModal = ({ approval, onClose, onApproved }) => {
       setLoading(true);
       // Only pass the approval ID, not the data
       await approveRequest(approval._id);
-      toast.success('Request approved successfully');
       onApproved?.();
       onClose();
     } catch (error) {

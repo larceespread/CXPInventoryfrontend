@@ -534,7 +534,6 @@ const AvailableAsset = ({
         
         console.log('📦 Updating item with data:', JSON.stringify(updateData, null, 2));
         await onEdit(updateData);
-        toast.success('Item updated successfully');
       }
       setShowForm(false);
       setSelectedItem(null);

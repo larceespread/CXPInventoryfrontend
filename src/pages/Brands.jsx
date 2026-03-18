@@ -27,22 +27,75 @@ const Brands = () => {
     description: '',
     status: 'active'
   });
+  const [lastFetchTime, setLastFetchTime] = useState(null);
+
+  const CACHE_KEY = 'brands_cache';
+  const CACHE_TIMESTAMP_KEY = 'brands_cache_timestamp';
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   const getBrandId = (brand) => {
     if (!brand) return null;
     return brand._id || brand.id || null;
   };
 
+  // Load cached data on initial mount
   useEffect(() => {
-    fetchBrands();
+    const loadCachedData = () => {
+      try {
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        const cachedTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+        
+        if (cachedData && cachedTimestamp) {
+          const parsedData = JSON.parse(cachedData);
+          const timestamp = parseInt(cachedTimestamp);
+          const now = Date.now();
+          
+          // Check if cache is still valid (less than 5 minutes old)
+          if (now - timestamp < CACHE_DURATION) {
+            setBrands(Array.isArray(parsedData) ? parsedData : []);
+            setLastFetchTime(timestamp);
+            return true; // Cache was used
+          }
+        }
+        return false; // No valid cache
+      } catch (error) {
+        console.error('Error loading cached data:', error);
+        return false;
+      }
+    };
+
+    // Try to load from cache first
+    const cacheLoaded = loadCachedData();
+    
+    // If no valid cache, fetch from API
+    if (!cacheLoaded) {
+      fetchBrands();
+    }
   }, []);
 
-  const fetchBrands = async () => {
+  const saveToLocalStorage = (data) => {
+    try {
+      const now = Date.now();
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      localStorage.setItem(CACHE_TIMESTAMP_KEY, now.toString());
+      setLastFetchTime(now);
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  };
+
+  const fetchBrands = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const response = await brandService.getBrands();
       const brandsData = response.data || response || [];
-      setBrands(Array.isArray(brandsData) ? brandsData : []);
+      const brandsArray = Array.isArray(brandsData) ? brandsData : [];
+      
+      setBrands(brandsArray);
+      
+      // Save to localStorage
+      saveToLocalStorage(brandsArray);
+      
     } catch (error) {
       console.error('Error fetching brands:', error);
       toast.error('Failed to load brands');
@@ -70,7 +123,11 @@ const Brands = () => {
     setLoading(true);
     try {
       if (formMode === 'create') {
-        await brandService.createBrand(formData);
+        const response = await brandService.createBrand(formData);
+        const newBrand = response.data || response;
+        const updatedBrands = [...brands, newBrand];
+        setBrands(updatedBrands);
+        saveToLocalStorage(updatedBrands);
         toast.success('Brand added successfully');
       } else {
         const brandId = getBrandId(selectedBrand);
@@ -78,14 +135,19 @@ const Brands = () => {
           toast.error('Cannot update: Brand ID not found');
           return;
         }
-        await brandService.updateBrand(brandId, formData);
+        const response = await brandService.updateBrand(brandId, formData);
+        const updatedBrand = response.data || response;
+        const updatedBrands = brands.map(brand => 
+          (getBrandId(brand) === brandId) ? updatedBrand : brand
+        );
+        setBrands(updatedBrands);
+        saveToLocalStorage(updatedBrands);
         toast.success('Brand updated successfully');
       }
       
       setFormData({ name: '', description: '', status: 'active' });
       setShowForm(false);
       setSelectedBrand(null);
-      fetchBrands();
     } catch (error) {
       console.error('Error saving brand:', error);
       toast.error(error.response?.data?.message || 'Failed to save brand');
@@ -120,8 +182,10 @@ const Brands = () => {
     setLoading(true);
     try {
       await brandService.deleteBrand(brandId);
+      const updatedBrands = brands.filter(b => getBrandId(b) !== brandId);
+      setBrands(updatedBrands);
+      saveToLocalStorage(updatedBrands);
       toast.success('Brand deleted successfully');
-      fetchBrands();
     } catch (error) {
       console.error('Error deleting brand:', error);
       toast.error(error.response?.data?.message || 'Failed to delete brand');
@@ -136,10 +200,25 @@ const Brands = () => {
     setFormData({ name: '', description: '', status: 'active' });
   };
 
+  const handleRefresh = () => {
+    fetchBrands(true);
+  };
+
   const filteredBrands = brands.filter(brand => 
     brand.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     brand.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const formatLastFetchTime = () => {
+    if (!lastFetchTime) return 'Never';
+    
+    const now = Date.now();
+    const diff = now - lastFetchTime;
+    
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
+    return `${Math.floor(diff / 3600000)} hours ago`;
+  };
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'} transition-colors duration-200`}>
@@ -148,9 +227,21 @@ const Brands = () => {
         <div className="mb-6 flex justify-between items-center">
           <div>
             <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Brands</h1>
-            <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
-              Total Brands: {brands.length}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
+                Total Brands: {brands.length}
+              </p>
+              <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'} mt-1`}>
+                (Last updated: {formatLastFetchTime()})
+              </span>
+              <button
+                onClick={handleRefresh}
+                className={`text-xs ${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'} mt-1 underline`}
+                disabled={loading}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
           <button
             onClick={() => {

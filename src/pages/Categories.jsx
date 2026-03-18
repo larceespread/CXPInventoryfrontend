@@ -28,22 +28,75 @@ const Categories = () => {
     type: 'sellable',
     status: 'active'
   });
+  const [lastFetchTime, setLastFetchTime] = useState(null);
+
+  const CACHE_KEY = 'categories_cache';
+  const CACHE_TIMESTAMP_KEY = 'categories_cache_timestamp';
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   const getCategoryId = (category) => {
     if (!category) return null;
     return category._id || category.id || null;
   };
 
+  // Load cached data on initial mount
   useEffect(() => {
-    fetchCategories();
+    const loadCachedData = () => {
+      try {
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        const cachedTimestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+        
+        if (cachedData && cachedTimestamp) {
+          const parsedData = JSON.parse(cachedData);
+          const timestamp = parseInt(cachedTimestamp);
+          const now = Date.now();
+          
+          // Check if cache is still valid (less than 5 minutes old)
+          if (now - timestamp < CACHE_DURATION) {
+            setCategories(Array.isArray(parsedData) ? parsedData : []);
+            setLastFetchTime(timestamp);
+            return true; // Cache was used
+          }
+        }
+        return false; // No valid cache
+      } catch (error) {
+        console.error('Error loading cached data:', error);
+        return false;
+      }
+    };
+
+    // Try to load from cache first
+    const cacheLoaded = loadCachedData();
+    
+    // If no valid cache, fetch from API
+    if (!cacheLoaded) {
+      fetchCategories();
+    }
   }, []);
 
-  const fetchCategories = async () => {
+  const saveToLocalStorage = (data) => {
+    try {
+      const now = Date.now();
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      localStorage.setItem(CACHE_TIMESTAMP_KEY, now.toString());
+      setLastFetchTime(now);
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  };
+
+  const fetchCategories = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const response = await categoryService.getCategories();
       const categoriesData = response.data || response || [];
-      setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+      const categoriesArray = Array.isArray(categoriesData) ? categoriesData : [];
+      
+      setCategories(categoriesArray);
+      
+      // Save to localStorage
+      saveToLocalStorage(categoriesArray);
+      
     } catch (error) {
       console.error('Error fetching categories:', error);
       toast.error('Failed to load categories');
@@ -86,7 +139,9 @@ const Categories = () => {
       setFormData({ name: '', description: '', type: 'sellable', status: 'active' });
       setShowForm(false);
       setSelectedCategory(null);
-      fetchCategories();
+      
+      // Refresh data and update cache
+      await fetchCategories(true);
     } catch (error) {
       console.error('Error saving category:', error);
       toast.error(error.response?.data?.message || 'Failed to save category');
@@ -123,7 +178,9 @@ const Categories = () => {
     try {
       await categoryService.deleteCategory(categoryId);
       toast.success('Category deleted successfully');
-      fetchCategories();
+      
+      // Refresh data and update cache
+      await fetchCategories(true);
     } catch (error) {
       console.error('Error deleting category:', error);
       toast.error(error.response?.data?.message || 'Failed to delete category');
@@ -136,6 +193,10 @@ const Categories = () => {
     setShowForm(false);
     setSelectedCategory(null);
     setFormData({ name: '', description: '', type: 'sellable', status: 'active' });
+  };
+
+  const handleRefresh = () => {
+    fetchCategories(true);
   };
 
   const filteredCategories = categories.filter(category => 
@@ -151,6 +212,17 @@ const Categories = () => {
     return colors[type] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
   };
 
+  const formatLastFetchTime = () => {
+    if (!lastFetchTime) return 'Never';
+    
+    const now = Date.now();
+    const diff = now - lastFetchTime;
+    
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} minutes ago`;
+    return `${Math.floor(diff / 3600000)} hours ago`;
+  };
+
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'} transition-colors duration-200`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -158,9 +230,21 @@ const Categories = () => {
         <div className="mb-6 flex justify-between items-center">
           <div>
             <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Categories</h1>
-            <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
-              Total Categories: {categories.length}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
+                Total Categories: {categories.length}
+              </p>
+              <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'} mt-1`}>
+                (Last updated: {formatLastFetchTime()})
+              </span>
+              <button
+                onClick={handleRefresh}
+                className={`text-xs ${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'} mt-1 underline`}
+                disabled={loading}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
           <button
             onClick={() => {

@@ -1399,18 +1399,7 @@ const ShipmentForm = ({ shipment: propShipment, onSuccess, onCancel, inline = fa
             <div className="text-center py-12 bg-gray-50 dark:bg-gray-700 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
               <Package className="h-12 w-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
               <p className="text-gray-500 dark:text-gray-400">No items added yet</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingIndex(-1);
-                  setSearchTerm('');
-                  setShowProductModal(true);
-                }}
-                className="mt-4 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add First Item
-              </button>
+            
             </div>
           )}
         </div>
